@@ -1,19 +1,19 @@
 /**
  * Main Agent — full-screen conversational AI.
  *
- * Replaces the legacy notification bell on the home screen. Renders the
- * conversation history from /agent/conversation and posts new turns via
- * /agent/message. Supports the widget protocol from main-agent-addon.md:
- *   pin_required, confirmation, pool_selector, vote
- * (contact_picker is not yet rendered — backend has no contacts API.)
+ * Renders the conversation history from /agent/conversation and posts new
+ * turns via /agent/message. Supported widgets:
+ *   pin_required, confirmation, pool_selector, vote, contact_picker
  */
-import { useEffect, useRef, useState } from 'react';
-import { Send, X, MoreHorizontal, Loader2, Lock, Check } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Send, X, MoreHorizontal, Loader2, Lock, Check, Users } from 'lucide-react';
 import {
   useMainAgentConversation,
   useSendMainAgentMessage,
   useClearMainAgent,
   useConfirmMainAgentAction,
+  useContacts,
+  type Contact,
   type MainAgentMessage,
   type MainAgentWidget,
 } from '../../api/hooks';
@@ -274,6 +274,8 @@ function WidgetRenderer({
       return <ConfirmationCard widget={widget} onConfirm={onAction} />;
     case 'pool_selector':
       return <PoolSelector widget={widget} onPick={onAction} />;
+    case 'contact_picker':
+      return <ContactPicker widget={widget} onConfirm={onAction} />;
     case 'vote':
       return <VoteCard widget={widget} onVote={onAction} />;
     // Data viz widgets
@@ -414,6 +416,181 @@ function PoolSelector({
           <span style={{ fontSize: 12, fontWeight: 700, color: '#005AFF' }}>RM{p.balance}</span>
         </button>
       ))}
+    </div>
+  );
+}
+
+function ContactPicker({
+  widget,
+  onConfirm,
+}: {
+  widget: MainAgentWidget;
+  onConfirm: (text: string) => void;
+}) {
+  const multi = widget.multi !== false;
+  const contactsQuery = useContacts();
+  const contacts: Contact[] = useMemo(() => contactsQuery.data ?? [], [contactsQuery.data]);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [submitted, setSubmitted] = useState(false);
+
+  const toggle = (id: string) => {
+    setSelected((prev) => {
+      if (multi) {
+        const next = new Set(prev);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        return next;
+      }
+      return new Set(prev.has(id) ? [] : [id]);
+    });
+  };
+
+  const handleConfirm = () => {
+    if (selected.size === 0 || submitted) return;
+    const picked = contacts.filter((c) => selected.has(c.id));
+    const names = picked.map((c) => c.displayName);
+    const text =
+      names.length === 1
+        ? `Invite ${names[0]} (${picked[0].phone})`
+        : `Invite ${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+    setSubmitted(true);
+    onConfirm(text);
+  };
+
+  return (
+    <div
+      style={{
+        alignSelf: 'flex-start',
+        maxWidth: '85%',
+        width: '100%',
+        background: '#fff',
+        border: '1.5px solid #E5E7EB',
+        borderRadius: 12,
+        padding: 12,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 8,
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <Users size={16} color="#005AFF" />
+        <p style={{ margin: 0, fontSize: 12, fontWeight: 700, color: '#0A0A0A' }}>
+          {multi ? 'Select members to invite' : 'Select a contact'}
+        </p>
+      </div>
+
+      {contactsQuery.isLoading && (
+        <div style={{ fontSize: 12, color: '#6B7280', padding: '8px 4px' }}>Loading contacts…</div>
+      )}
+      {contactsQuery.isError && (
+        <div style={{ fontSize: 12, color: '#B42318', padding: '8px 4px' }}>
+          Couldn't load contacts.
+        </div>
+      )}
+      {!contactsQuery.isLoading && contacts.length === 0 && !contactsQuery.isError && (
+        <div style={{ fontSize: 12, color: '#6B7280', padding: '8px 4px' }}>
+          No contacts available.
+        </div>
+      )}
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        {contacts.map((c) => {
+          const isPicked = selected.has(c.id);
+          return (
+            <button
+              key={c.id}
+              type="button"
+              disabled={submitted}
+              onClick={() => toggle(c.id)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                padding: '8px 10px',
+                borderRadius: 10,
+                border: `1.5px solid ${isPicked ? '#005AFF' : '#F3F4F6'}`,
+                background: isPicked ? '#EFF6FF' : '#FAFAFA',
+                cursor: submitted ? 'default' : 'pointer',
+                textAlign: 'left',
+                opacity: submitted && !isPicked ? 0.5 : 1,
+                transition: 'background 0.15s, border-color 0.15s',
+              }}
+            >
+              <div
+                style={{
+                  width: 32,
+                  height: 32,
+                  borderRadius: '50%',
+                  background: '#DBEAFE',
+                  color: '#1E40AF',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: 13,
+                  fontWeight: 800,
+                  flexShrink: 0,
+                }}
+              >
+                {c.displayName?.[0] ?? '?'}
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div
+                  style={{
+                    fontSize: 13,
+                    fontWeight: 600,
+                    color: '#0A0A0A',
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                  }}
+                >
+                  {c.displayName}
+                </div>
+                <div style={{ fontSize: 11, color: '#6B7280' }}>{c.phone}</div>
+              </div>
+              <div
+                style={{
+                  width: 18,
+                  height: 18,
+                  borderRadius: multi ? 5 : '50%',
+                  border: `1.5px solid ${isPicked ? '#005AFF' : '#CBD5E1'}`,
+                  background: isPicked ? '#005AFF' : '#fff',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                }}
+              >
+                {isPicked && <Check size={12} color="#fff" strokeWidth={3} />}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+
+      <button
+        type="button"
+        onClick={handleConfirm}
+        disabled={selected.size === 0 || submitted}
+        style={{
+          marginTop: 4,
+          height: 38,
+          borderRadius: 10,
+          border: 'none',
+          background: selected.size === 0 || submitted ? '#CBD5E1' : '#005AFF',
+          color: '#fff',
+          fontSize: 13,
+          fontWeight: 700,
+          cursor: selected.size === 0 || submitted ? 'not-allowed' : 'pointer',
+          fontFamily: 'Inter, sans-serif',
+        }}
+      >
+        {submitted
+          ? 'Sent'
+          : selected.size === 0
+          ? 'Select at least one'
+          : `Invite ${selected.size} ${selected.size === 1 ? 'person' : 'people'}`}
+      </button>
     </div>
   );
 }

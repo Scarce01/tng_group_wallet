@@ -13,6 +13,23 @@ export function useMe(options?: Partial<UseQueryOptions<User>>) {
   });
 }
 
+export interface Contact {
+  id: string;
+  displayName: string;
+  fullName: string;
+  phone: string;
+  avatarUrl: string | null;
+}
+
+export function useContacts() {
+  return useQuery({
+    queryKey: ["contacts"],
+    queryFn: () => api<Contact[]>("/users/contacts"),
+    enabled: !!tokens.access,
+    staleTime: 60_000,
+  });
+}
+
 export function useLogin() {
   const qc = useQueryClient();
   return useMutation({
@@ -308,6 +325,15 @@ export function useCreatePool() {
       targetAmount?: string;
       endDate?: string;
     }) => api<Pool>("/pools", { method: "POST", body }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["pools"] }),
+  });
+}
+
+export function useDeletePool() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (poolId: string) =>
+      api<void>(`/pools/${poolId}`, { method: "DELETE" }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["pools"] }),
   });
 }

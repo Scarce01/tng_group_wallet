@@ -39,6 +39,29 @@ async def me(auth: AuthCtx = Depends(require_auth), session: AsyncSession = Depe
     return public_user(u)
 
 
+@router.get("/contacts")
+async def contacts(auth: AuthCtx = Depends(require_auth), session: AsyncSession = Depends(get_session)):
+    """Lightweight contact directory used by the Main Agent contact picker.
+    Returns every active user except the caller. For a real product this would
+    be filtered by phone-book matches; the demo seed has only a handful of
+    users, so we return all of them."""
+    rows = (
+        await session.execute(
+            select(User).where(User.id != auth.user_id, User.isActive.is_(True)).order_by(User.displayName)
+        )
+    ).scalars().all()
+    return [
+        {
+            "id": u.id,
+            "displayName": u.displayName,
+            "fullName": u.fullName,
+            "phone": u.phone,
+            "avatarUrl": u.avatarUrl,
+        }
+        for u in rows
+    ]
+
+
 @router.patch("/me")
 async def patch_me(body: UpdateProfileIn, auth: AuthCtx = Depends(require_auth),
                    session: AsyncSession = Depends(get_session)):

@@ -52,6 +52,15 @@ _CLAUDE_TASKS = {
     "personality_calibration",
     "anticipatory",
     "humor_response",
+    # Main Agent + Pool Agent — promoted to Claude for better instruction
+    # following (tool calls + JSON shape). If ANTHROPIC_API_KEY is unset or
+    # Claude errors, the existing Ollama fallback path catches it.
+    "main_agent",
+    "main_agent_followup",
+    "daily_brief",
+    "evaluate_spend",
+    "extract_pool",
+    "forecast",
 }
 
 
@@ -84,17 +93,40 @@ async def query(
     response: str
     fallback_used = False
     if chosen == "claude":
-        # Claude SDK is sync-only; offload to a thread.
-        response = await asyncio.to_thread(
-            query_claude_sanitized,
-            prompt,
-            member_names=member_names,
-            system=system,
-            max_tokens=max_tokens,
-            temperature=temperature,
-        )
-        model_id = "claude-sonnet-4-5"
+        try:
+            # Claude SDK is sync-only; offload to a thread.
+            response = await asyncio.to_thread(
+                _claude_call,
+                prompt,
+                member_names=member_names,
+                system=system,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                json_mode=json_mode,
+            )
+            model_id = "claude-sonnet-4-5"
+        except Exception as e:
+            log.warning(
+                "agent.query claude failed (task=%s): %s — falling back to Ollama",
+                task_type, e,
+            )
+            model_id = DEFAULT_MODEL
+            if json_mode:
+                response = await query_ollama_json(
+                    prompt, model=model_id, system=system, temperature=temperature
+                )
+                response = response if isinstance(response, str) else _to_json(response)
+            else:
+                response = await query_ollama(
+                    prompt, model=model_id, system=system, temperature=temperature
+                )
+            chosen = "llama3.2"
+            fallback_used = True
+            fallback_from_label = "claude"
+        else:
+            fallback_from_label = None
     else:
+        fallback_from_label = None
         model_id = REASONING_MODEL if chosen == "deepseek-r1" else DEFAULT_MODEL
         try:
             if json_mode:
@@ -124,6 +156,7 @@ async def query(
             model_id = "claude-sonnet-4-5"
             chosen = "claude"
             fallback_used = True
+            fallback_from_label = "ollama"
 
     latency_ms = int((time.monotonic() - start) * 1000)
     meta = {
@@ -132,14 +165,53 @@ async def query(
         "task_type": task_type,
         "latency_ms": latency_ms,
     }
-    if fallback_used:
-        meta["fallback_from"] = "ollama"
+    if fallback_used and fallback_from_label:
+        meta["fallback_from"] = fallback_from_label
     log.info(
         "agent.query tier=%s model=%s task=%s latency=%dms%s",
         chosen, model_id, task_type, latency_ms,
-        " fallback=ollama→claude" if fallback_used else "",
+        f" fallback={fallback_from_label}→{chosen}" if fallback_used else "",
     )
     return response, meta
+
+
+def _claude_call(
+    prompt: str,
+    *,
+    member_names: Iterable[str],
+    system: Optional[str],
+    max_tokens: int,
+    temperature: float,
+    json_mode: bool,
+) -> str:
+    """Sync helper: sanitized Claude call. Adds a JSON-only system note when
+    json_mode is requested, then strips fences/prose and returns a parseable
+    JSON string (or '{}' if Claude refused to comply)."""
+    sys_prompt = system
+    if json_mode:
+        json_note = (
+            "Respond ONLY with a single valid JSON object. "
+            "No prose, no markdown fences, no commentary before or after."
+        )
+        sys_prompt = f"{system}\n\n{json_note}" if system else json_note
+    text = query_claude_sanitized(
+        prompt,
+        member_names=member_names,
+        system=sys_prompt,
+        max_tokens=max_tokens,
+        temperature=temperature,
+    )
+    if not json_mode:
+        return text
+    cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip(), flags=re.MULTILINE)
+    m = re.search(r"\{[\s\S]*\}", cleaned)
+    candidate = m.group(0) if m else cleaned
+    try:
+        _json.loads(candidate)
+        return candidate
+    except Exception:
+        log.warning("claude returned non-JSON: %r", text[:200])
+        return "{}"
 
 
 def _claude_fallback_enabled() -> bool:
@@ -170,35 +242,15 @@ async def _claude_fallback(
     temperature: float,
     max_tokens: int,
 ) -> str:
-    sys_prompt = system
-    if json_mode:
-        json_note = (
-            "Respond ONLY with a single valid JSON object. "
-            "No prose, no markdown fences, no commentary before or after."
-        )
-        sys_prompt = f"{system}\n\n{json_note}" if system else json_note
-
-    text = await asyncio.to_thread(
-        query_claude_sanitized,
+    return await asyncio.to_thread(
+        _claude_call,
         prompt,
         member_names=member_names,
-        system=sys_prompt,
+        system=system,
         max_tokens=max_tokens,
         temperature=temperature,
+        json_mode=json_mode,
     )
-    if json_mode:
-        # Claude sometimes wraps JSON in ```json fences or adds a sentence.
-        # Strip both, then validate; on failure return "{}" like ollama_json does.
-        cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip(), flags=re.MULTILINE)
-        m = re.search(r"\{[\s\S]*\}", cleaned)
-        candidate = m.group(0) if m else cleaned
-        try:
-            _json.loads(candidate)
-            return candidate
-        except Exception:
-            log.warning("claude fallback returned non-JSON: %r", text[:200])
-            return "{}"
-    return text
 
 
 def _to_json(d) -> str:

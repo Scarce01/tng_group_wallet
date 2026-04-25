@@ -2,12 +2,12 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
   Plus, QrCode, Gift, Shield, Users, ChevronLeft, ChevronRight,
   ArrowDownLeft, ArrowUpRight, LayoutGrid, X, TrendingUp,
-  GraduationCap, Home, Utensils, ShoppingCart, Zap, Wallet, Bot
+  GraduationCap, Home, Utensils, ShoppingCart, Zap, Wallet, Bot, Trash2,
 } from 'lucide-react';
 import { PoolScanPayDialog } from './PoolScanPayDialog';
 import { AiAdvisorDialog } from './AiAdvisorDialog';
 import { AiAdvisorIcon } from './AiAdvisorIcon';
-import { useAgentBrief, useAgentContext } from '../../api/hooks';
+import { useAgentBrief, useAgentContext, useDeletePool } from '../../api/hooks';
 
 /** Local storage key for "user dismissed today's tip for this pool". */
 function dismissalKey(poolId: string): string {
@@ -128,6 +128,9 @@ export function PoolPage({
   const [showAllCards, setShowAllCards] = useState(false);
   const [showScanPay, setShowScanPay] = useState(false);
   const [showAiAdvisor, setShowAiAdvisor] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const deletePool = useDeletePool();
   // "Daily" dismissal — stored as YYYY-MM-DD in localStorage so the card
   // pops back the next calendar day.
   const [dismissedDate, setDismissedDate] = useState<string | null>(null);
@@ -580,10 +583,77 @@ export function PoolPage({
             >
               <Users size={16} /> Manage Members
             </button>
+
+            {/* Delete pool */}
+            <button
+              onClick={() => { setDeleteError(null); setConfirmDelete(true); }}
+              style={{
+                width: '100%', height: 46, borderRadius: 999, marginTop: 10,
+                background: '#FEF2F2', border: '1.5px solid #FECACA',
+                color: '#B91C1C', fontSize: 14, fontWeight: 700, cursor: 'pointer',
+                fontFamily: 'Inter, sans-serif', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+              }}
+            >
+              <Trash2 size={16} /> Delete Pool
+            </button>
           </>
         )}
       </div>
       </div>
+
+      {/* ── DELETE CONFIRMATION ── */}
+      {confirmDelete && activePool && (
+        <div
+          style={{ position: 'absolute', inset: 0, zIndex: 110, background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}
+          onClick={() => !deletePool.isPending && setConfirmDelete(false)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{ background: '#fff', borderRadius: 18, padding: 22, width: '100%', maxWidth: 340, boxShadow: '0 16px 48px rgba(0,0,0,0.24)', fontFamily: 'Inter, sans-serif' }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+              <div style={{ width: 36, height: 36, borderRadius: '50%', background: '#FEF2F2', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Trash2 size={18} color="#B91C1C" />
+              </div>
+              <p style={{ margin: 0, fontSize: 16, fontWeight: 800, color: '#0A0A0A' }}>Delete pool?</p>
+            </div>
+            <p style={{ margin: '4px 0 14px', fontSize: 13, color: '#4B5563', lineHeight: 1.5 }}>
+              <strong>{activePool.name}</strong> will be permanently removed. This can only be done if the pool has no balance and no transactions.
+            </p>
+            {deleteError && (
+              <p style={{ margin: '0 0 12px', fontSize: 12, color: '#B91C1C', background: '#FEF2F2', border: '1px solid #FECACA', padding: '8px 10px', borderRadius: 8 }}>
+                {deleteError}
+              </p>
+            )}
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button
+                disabled={deletePool.isPending}
+                onClick={() => setConfirmDelete(false)}
+                style={{ flex: 1, height: 44, borderRadius: 999, background: '#F3F4F6', border: 'none', color: '#374151', fontSize: 14, fontWeight: 700, cursor: 'pointer' }}
+              >
+                Cancel
+              </button>
+              <button
+                disabled={deletePool.isPending}
+                onClick={() => {
+                  deletePool.mutate(activePool.id, {
+                    onSuccess: () => {
+                      setConfirmDelete(false);
+                      setActiveIndex(0);
+                    },
+                    onError: (err: unknown) => {
+                      setDeleteError((err as Error)?.message ?? 'Could not delete this pool');
+                    },
+                  });
+                }}
+                style={{ flex: 1, height: 44, borderRadius: 999, background: deletePool.isPending ? '#FCA5A5' : '#DC2626', border: 'none', color: '#fff', fontSize: 14, fontWeight: 700, cursor: deletePool.isPending ? 'wait' : 'pointer' }}
+              >
+                {deletePool.isPending ? 'Deleting…' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── VIEW ALL CARDS BOTTOM SHEET ── */}
       {showAllCards && (

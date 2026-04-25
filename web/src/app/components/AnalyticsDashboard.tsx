@@ -1,7 +1,9 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Home, GraduationCap, ShoppingCart, Lightbulb, Utensils, Backpack, Pill, Hospital, Syringe, Milk, Ship, Activity, Book, Zap, Droplet, DollarSign, Bot, FileDown, Shield, Lock, X, CheckCircle2 } from 'lucide-react';
 import { POOL_REPORT_DATA, maskName } from '../data/poolData';
 import type { PoolReport } from '../data/poolData';
+import { usePools, usePoolTransactions } from '../../api/hooks';
+import type { Pool, Transaction } from '../../api/client';
 import svgPaths from '../../imports/Pool-2/svg-j7y9f97e6x';
 import FigmaTree from '../../imports/Icon-1/Icon-2043-273';
 
@@ -105,6 +107,136 @@ const TRIPS_DATA: Record<TripId, PoolEntry> = {
 };
 
 // ─── Fiber generator ───────────��──────────────────────────────────────────────
+// ─── Real-data synthesis ──────────────────────────────────────────────────────
+const CATEGORY_META: Record<string, { label: string; icon: IconType }> = {
+  FOOD: { label: 'Food & Dining', icon: 'utensils' },
+  GROCERIES: { label: 'Groceries', icon: 'shopping-cart' },
+  SHOPPING: { label: 'Shopping', icon: 'shopping-cart' },
+  TRANSPORT: { label: 'Transport', icon: 'home' },
+  PETROL: { label: 'Petrol', icon: 'droplet' },
+  ACCOMMODATION: { label: 'Stay', icon: 'home' },
+  ACTIVITIES: { label: 'Activities', icon: 'lightbulb' },
+  TOLL: { label: 'Tolls', icon: 'home' },
+  RENT: { label: 'Rent', icon: 'home' },
+  UTILITIES: { label: 'Utilities', icon: 'lightbulb' },
+  EDUCATION: { label: 'Education', icon: 'graduation-cap' },
+  MEDICAL: { label: 'Medical', icon: 'pill' },
+  INSURANCE: { label: 'Insurance', icon: 'hospital' },
+  CHILDCARE: { label: 'Childcare', icon: 'book' },
+  OTHER_TRIP: { label: 'Other', icon: 'book' },
+  OTHER_FAMILY: { label: 'Other', icon: 'book' },
+};
+const BRANCH_COLORS: string[] = [C.cyan, C.orange, C.green, C.blue];
+
+function categoryFromTx(t: Transaction): string {
+  const meta = (t.metadata ?? {}) as { category?: string };
+  if (meta.category && CATEGORY_META[meta.category]) return meta.category;
+  const d = (t.description || '').toLowerCase();
+  if (/(nasi|mamak|restoran|kedai|cafe|food|lemak|kandar|supper)/.test(d)) return 'FOOD';
+  if (/(tesco|lotus|grocery|99 ?speedmart|mart)/.test(d)) return 'GROCERIES';
+  if (/(shopee|lazada|decathlon|sport|shopping|clothing)/.test(d)) return 'SHOPPING';
+  if (/(petrol|fuel|shell|petronas)/.test(d)) return 'PETROL';
+  if (/(grab|uber|taxi|bus|train|toll|transport)/.test(d)) return 'TRANSPORT';
+  if (/(hotel|airbnb|stay|hostel)/.test(d)) return 'ACCOMMODATION';
+  if (/(rent|mortgage)/.test(d)) return 'RENT';
+  if (/(electric|water|unifi|astro|internet|bill)/.test(d)) return 'UTILITIES';
+  if (/(clinic|hospital|farmasi|pharma|pill|medicine)/.test(d)) return 'MEDICAL';
+  return 'OTHER_TRIP';
+}
+
+function shortItemName(desc: string): string {
+  const split = desc.split(/[—\-–]/);
+  return (split[0] || desc).trim().slice(0, 28);
+}
+
+function synthesizePoolEntry(pool: Pool, transactions: Transaction[]): PoolEntry {
+  const memberCount = pool.members?.length ?? pool._count?.contributions ?? 0;
+  const spend = transactions.filter((t) => t.direction === 'OUT' && t.type === 'SPEND');
+
+  const buckets = new Map<string, { total: number; items: Transaction[] }>();
+  for (const t of spend) {
+    const cat = categoryFromTx(t);
+    const amt = parseFloat(t.amount) || 0;
+    const b = buckets.get(cat) ?? { total: 0, items: [] };
+    b.total += amt;
+    b.items.push(t);
+    buckets.set(cat, b);
+  }
+
+  const ordered = [...buckets.entries()].sort((a, b) => b[1].total - a[1].total).slice(0, 4);
+  while (ordered.length < 4) ordered.push([`__EMPTY_${ordered.length}`, { total: 0, items: [] }]);
+
+  const buildBranch = (key: string, data: { total: number; items: Transaction[] }, color: string): PoolBranch => {
+    const meta = CATEGORY_META[key];
+    const label = meta?.label ?? '—';
+    const icon: IconType = meta?.icon ?? 'book';
+    const items: PoolBranchItem[] = data.items
+      .sort((a, b) => parseFloat(b.amount) - parseFloat(a.amount))
+      .slice(0, 3)
+      .map((t) => ({
+        icon,
+        name: shortItemName(t.description),
+        amount: `RM ${(parseFloat(t.amount) || 0).toFixed(0)}`,
+      }));
+    return { label, icon, total: Math.round(data.total), color, items };
+  };
+
+  const totalSpent = spend.reduce((s, t) => s + (parseFloat(t.amount) || 0), 0);
+  const aiLimit = Math.max(Math.round(totalSpent * 1.25), Math.round(totalSpent + 200), 500);
+
+  return {
+    name: pool.name,
+    icon: 'home',
+    members: memberCount,
+    total: Math.round(totalSpent),
+    aiLimit,
+    A: buildBranch(ordered[0][0], ordered[0][1], BRANCH_COLORS[0]),
+    B: buildBranch(ordered[1][0], ordered[1][1], BRANCH_COLORS[1]),
+    C: buildBranch(ordered[2][0], ordered[2][1], BRANCH_COLORS[2]),
+    D: buildBranch(ordered[3][0], ordered[3][1], BRANCH_COLORS[3]),
+  };
+}
+
+function synthesizeReport(pool: Pool, transactions: Transaction[]): PoolReport {
+  const fmtTs = (iso: string) => {
+    try {
+      const d = new Date(iso);
+      return d.toLocaleString('en-MY', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    } catch { return iso; }
+  };
+  const ins = transactions.filter((t) => t.direction === 'IN' && t.type === 'CONTRIBUTION');
+  const outs = transactions.filter((t) => t.direction === 'OUT' && t.type === 'SPEND');
+
+  const contribMap = new Map<string, { name: string; amount: number }>();
+  for (const t of ins) {
+    const name = t.user?.displayName ?? `User ${t.userId.slice(0, 4)}`;
+    const cur = contribMap.get(t.userId) ?? { name, amount: 0 };
+    cur.amount += parseFloat(t.amount) || 0;
+    contribMap.set(t.userId, cur);
+  }
+  if (contribMap.size === 0 && pool.members) {
+    for (const m of pool.members) {
+      if (!m.user) continue;
+      contribMap.set(m.userId, { name: m.user.displayName, amount: 0 });
+    }
+  }
+
+  return {
+    contributors: [...contribMap.values()].sort((a, b) => b.amount - a.amount),
+    transactions: outs
+      .sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt))
+      .map((t) => ({
+        spender: t.user?.displayName ?? 'Member',
+        description: t.description || '—',
+        amount: parseFloat(t.amount) || 0,
+        timestamp: fmtTs(t.createdAt),
+      })),
+  };
+}
+
+interface PoolSummary { id: string; name: string; icon: IconType; members: number; total: number; }
+
+// ─── Fiber generator ──────────────────────────────────────────────────────────
 interface FP { d: string; w: number; op: number; dash?: string; col: string }
 
 function mkFibers(
@@ -384,10 +516,10 @@ function FloatingParticle({ delay, left, color }: { delay: number; left: string;
 }
 
 // ─── Interactive Figma Tree Wrapper ──────────────────────────────────────────
-function InteractiveFigmaTree({ tripId }: { tripId: TripId }) {
+function InteractiveFigmaTree({ pool }: { pool: PoolEntry }) {
   const [focused, setFocused] = useState<BranchId | null>(null);
   const [hoveredBranch, setHoveredBranch] = useState<BranchId | null>(null);
-  const trip = TRIPS_DATA[tripId];
+  const trip = pool;
 
   const toggle = (id: BranchId, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -948,10 +1080,11 @@ function WalletIcon() {
 }
 
 // ─── Trip Selector Dropdown ───────────────────────────────────────────────────
-function TripSelector({ tripId, onSelect }: { tripId: TripId; onSelect: (id: TripId) => void }) {
+function TripSelector({ pools, activeId, onSelect }: { pools: PoolSummary[]; activeId: string; onSelect: (id: string) => void }) {
   const [open, setOpen] = useState(false);
-  const trip = TRIPS_DATA[tripId];
-  const allTrips = Object.entries(TRIPS_DATA) as [TripId, typeof TRIPS_DATA[TripId]][];
+  const trip = pools.find((p) => p.id === activeId) ?? pools[0];
+  if (!trip) return null;
+  const allTrips: [string, PoolSummary][] = pools.map((p) => [p.id, p]);
 
   return (
     <div style={{ position: 'relative' }}>
@@ -1171,13 +1304,12 @@ function CategoryRow({ branchId, branch, expanded, onToggle, poolTotal }: {
 
 // ─── Secure Pool Report Bottom Sheet ─────────────────────────────────────────
 function SecurePoolReportSheet({
-  tripId, onClose, onDownload,
-}: { tripId: TripId; onClose: () => void; onDownload: () => void; }) {
-  const trip = TRIPS_DATA[tripId];
-  const report = POOL_REPORT_DATA[tripId];
+  pool, report, poolId, onClose, onDownload,
+}: { pool: PoolEntry; report: PoolReport; poolId: string; onClose: () => void; onDownload: () => void; }) {
+  const trip = pool;
   const totalContributed = report.contributors.reduce((s, c) => s + c.amount, 0);
   const totalSpent = report.transactions.reduce((s, t) => s + t.amount, 0);
-  const reportId = `ZKP-${tripId.toUpperCase().slice(0, 3)}-${Date.now().toString(36).toUpperCase().slice(-6)}`;
+  const reportId = `ZKP-${poolId.toUpperCase().slice(0, 3)}-${Date.now().toString(36).toUpperCase().slice(-6)}`;
   const generatedAt = `25 Apr 2026, 14:32:05`;
 
   return (
@@ -1446,11 +1578,47 @@ function SecurePoolReportSheet({
 
 // ─── Main Export ──────────────────────────────────────────────────────────────
 export function AnalyticsDashboard() {
-  const [tripId, setTripId]       = useState<TripId>('education');
+  const poolsQuery = usePools();
+  const realPools = useMemo(() => poolsQuery.data ?? [], [poolsQuery.data]);
+  const [activeId, setActiveId] = useState<string | undefined>(undefined);
+
+  // Default to first real pool when data loads.
+  const effectiveId = activeId ?? realPools[0]?.id;
+  const activePool = realPools.find((p) => p.id === effectiveId);
+  const txQuery = usePoolTransactions(effectiveId);
+  const transactions = useMemo(() => txQuery.data ?? [], [txQuery.data]);
+
+  const trip: PoolEntry = useMemo(() => {
+    if (activePool) return synthesizePoolEntry(activePool, transactions);
+    // Fallback while loading: empty entry so the tree still renders.
+    return {
+      name: 'Loading…', icon: 'home', members: 0, total: 0, aiLimit: 0,
+      A: { label: '—', icon: 'book', total: 0, color: BRANCH_COLORS[0], items: [] },
+      B: { label: '—', icon: 'book', total: 0, color: BRANCH_COLORS[1], items: [] },
+      C: { label: '—', icon: 'book', total: 0, color: BRANCH_COLORS[2], items: [] },
+      D: { label: '—', icon: 'book', total: 0, color: BRANCH_COLORS[3], items: [] },
+    };
+  }, [activePool, transactions]);
+
+  const report: PoolReport = useMemo(() => {
+    if (activePool) return synthesizeReport(activePool, transactions);
+    return { contributors: [], transactions: [] };
+  }, [activePool, transactions]);
+
+  const poolSummaries: PoolSummary[] = useMemo(
+    () => realPools.map((p) => ({
+      id: p.id,
+      name: p.name,
+      icon: 'home' as IconType,
+      members: p.members?.length ?? p._count?.contributions ?? 0,
+      total: parseFloat(p.currentBalance) || 0,
+    })),
+    [realPools],
+  );
+
   const [expandedCat, setExpanded] = useState<BranchId | null>(null);
   const [showReport, setShowReport] = useState(false);
   const [downloadToast, setDownloadToast] = useState(false);
-  const trip = TRIPS_DATA[tripId];
 
   const handleDownload = () => {
     setShowReport(false);
@@ -1458,9 +1626,9 @@ export function AnalyticsDashboard() {
     setTimeout(() => setDownloadToast(false), 3200);
   };
 
-  const handleSelectPool = (id: TripId) => {
-    setTripId(id);
-    setExpanded(null); // reset expanded category when switching pools
+  const handleSelectPool = (id: string) => {
+    setActiveId(id);
+    setExpanded(null);
   };
 
   const toggleCat = (id: BranchId) => setExpanded(prev => prev === id ? null : id);
@@ -1502,11 +1670,11 @@ export function AnalyticsDashboard() {
       </div>
 
       {/* Pool Selector */}
-      <TripSelector tripId={tripId} onSelect={handleSelectPool} />
+      <TripSelector pools={poolSummaries} activeId={effectiveId ?? ''} onSelect={handleSelectPool} />
 
       {/* Tree */}
       <div style={{ margin: '4px -2px 0', overflow: 'hidden', position: 'relative', height: '420px' }}>
-        <InteractiveFigmaTree tripId={tripId} />
+        <InteractiveFigmaTree pool={trip} />
       </div>
 
       {/* Summary strip */}
@@ -1553,9 +1721,11 @@ export function AnalyticsDashboard() {
       <div style={{ height: 80 }} />
 
       {/* Secure Report Bottom Sheet */}
-      {showReport && (
+      {showReport && effectiveId && (
         <SecurePoolReportSheet
-          tripId={tripId}
+          pool={trip}
+          report={report}
+          poolId={effectiveId}
           onClose={() => setShowReport(false)}
           onDownload={handleDownload}
         />

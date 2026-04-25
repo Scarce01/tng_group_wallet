@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -163,11 +164,18 @@ async def handle_message(session: AsyncSession, user_id: str, user_message: str)
     conv = await _get_or_create_conversation(session, user_id)
     history = list(conv.messages or [])
 
-    # Render last N turns as a flat dialog string for the LLM
+    # Render last N turns as a flat dialog string for the LLM. For agent
+    # turns, also surface the widget types we rendered so Claude can see
+    # which UI affordances are already in play and avoid repeating them.
     transcript_lines = []
     for m in history[-_MAX_HISTORY:]:
         role = "User" if m.get("role") == "user" else "Agent"
-        transcript_lines.append(f"{role}: {m.get('content', '')}")
+        line = f"{role}: {m.get('content', '')}"
+        if role == "Agent":
+            wtypes = [w.get("type") for w in (m.get("widgets") or []) if isinstance(w, dict)]
+            if wtypes:
+                line += f"\n  [rendered widgets: {', '.join(wtypes)}]"
+        transcript_lines.append(line)
     transcript_lines.append(f"User: {user_message}")
     transcript = "\n".join(transcript_lines)
 
@@ -178,6 +186,36 @@ async def handle_message(session: AsyncSession, user_id: str, user_message: str)
     message = str(parsed.get("message", "")).strip()
     widgets = parsed.get("widgets") or []
     tool_calls = parsed.get("toolCalls") or []
+
+    # Guard: contact_picker may not repeat. If the previous agent turn already
+    # rendered one, strip any contact_picker the model emitted this turn and
+    # rewrite the message to acknowledge the names the user just typed. This
+    # backstops a known prompt-following weakness where Claude keeps insisting
+    # the user "select from your contacts" even after they typed names.
+    prev_agent = next(
+        (m for m in reversed(history) if m.get("role") == "agent"),
+        None,
+    )
+    prev_had_picker = bool(
+        prev_agent
+        and any(
+            isinstance(w, dict) and w.get("type") == "contact_picker"
+            for w in (prev_agent.get("widgets") or [])
+        )
+    )
+    if prev_had_picker:
+        widgets = [w for w in widgets if w.get("type") != "contact_picker"]
+        # If the model is still nagging "please select…" replace with a
+        # short acknowledgement so the UI doesn't look stuck.
+        nag_pattern = re.compile(
+            r"(please\s+)?select\b.*\bcontacts?|pick\b.*\blist|from your contacts",
+            re.IGNORECASE,
+        )
+        if nag_pattern.search(message):
+            message = (
+                "Got it — I've noted those contacts. "
+                "What's the monthly contribution target?"
+            )
 
     # Execute tool calls sequentially
     tool_results = []

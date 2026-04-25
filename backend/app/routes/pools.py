@@ -1,5 +1,6 @@
 """Pool CRUD: create / list / get / patch / archive / delete."""
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, Query, Response, status
@@ -11,7 +12,7 @@ from ..auth_dep import AuthCtx, require_auth
 from ..db import get_session
 from ..enums import MemberRole, PoolStatus, PoolType, SpendStatus
 from ..errors import Errors
-from ..models import Pool, PoolMember, SpendRequest, Contribution
+from ..models import Pool, PoolMember, SpendRequest, Contribution, Transaction
 from ..schemas.pool import CreatePoolIn, UpdatePoolIn
 from ..serialize import model_to_dict
 from ..services.pool_service import assert_pool_admin, assert_pool_member
@@ -149,8 +150,18 @@ async def delete_pool(pool_id: str, auth: AuthCtx = Depends(require_auth),
     pool = (await session.execute(select(Pool).where(Pool.id == pool_id))).scalar_one_or_none()
     if not pool:
         raise Errors.not_found("Pool")
+    # DRAFT pools can always be deleted. ACTIVE/PAUSED pools can be deleted by
+    # the owner if they have zero balance and no transactions on record — this
+    # covers the common case of "I created a pool by mistake, get rid of it".
     if pool.status != PoolStatus.DRAFT:
-        raise Errors.conflict("Only DRAFT pools can be deleted")
+        bal = Decimal(pool.currentBalance or 0)
+        tx_count = (await session.execute(
+            select(func.count()).select_from(Transaction).where(Transaction.poolId == pool_id)
+        )).scalar_one()
+        if bal != 0 or tx_count > 0:
+            raise Errors.conflict(
+                "Pool still has a balance or transactions — settle and refund before deleting"
+            )
     await session.delete(pool)
     await session.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

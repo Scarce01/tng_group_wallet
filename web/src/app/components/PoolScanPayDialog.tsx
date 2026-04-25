@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { CheckCircle2, X, QrCode, Shield, Users, Zap, Loader2, Store, Delete } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { CheckCircle2, X, QrCode, Shield, Users, Zap, Loader2, Store, Delete, Camera } from 'lucide-react';
+import jsQR from 'jsqr';
 import { usePaymentApproval } from '../../api/hooks';
 
 interface Pool {
@@ -25,17 +26,13 @@ interface MerchantInfo {
 
 type ScanStep = 'scanning' | 'amount' | 'confirm' | 'approving' | 'success' | 'failed';
 
-// Demo merchants embedded in QR codes (simulates real QR scan)
-const DEMO_QR_MERCHANTS: MerchantInfo[] = [
-  { merchantId: 'TNG-M-001', name: 'Giant Hypermarket', category: 'GROCERIES' },
-  { merchantId: 'TNG-M-002', name: '99 Speedmart', category: 'GROCERIES' },
-  { merchantId: 'TNG-M-003', name: 'KFC Malaysia', category: 'FOOD' },
-  { merchantId: 'TNG-M-004', name: 'Restoran Nasi Lemak', category: 'FOOD' },
-  { merchantId: 'TNG-M-005', name: 'Petronas Station', category: 'PETROL' },
-  { merchantId: 'TNG-M-006', name: 'Watsons', category: 'PHARMACY' },
-  { merchantId: 'TNG-M-007', name: 'Grab Ride', category: 'TRANSPORT' },
-  { merchantId: 'TNG-M-008', name: 'MR DIY', category: 'SHOPPING' },
-];
+function parseMerchantQR(data: string): MerchantInfo | null {
+  try {
+    const obj = JSON.parse(data);
+    if (obj.merchantId && obj.name && obj.category) return obj as MerchantInfo;
+  } catch { /* not JSON — ignore */ }
+  return null;
+}
 
 const F = 'Inter, sans-serif';
 
@@ -117,37 +114,91 @@ export function PoolScanPayDialog({ open, onOpenChange, pool }: PoolScanPayDialo
   const [step, setStep] = useState<ScanStep>('scanning');
   const [merchant, setMerchant] = useState<MerchantInfo | null>(null);
   const [amountStr, setAmountStr] = useState('');
-  const [scanProgress, setScanProgress] = useState(0);
+  const [scanError, setScanError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const paymentApproval = usePaymentApproval();
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const scanLoopRef = useRef<number>(0);
 
   const amount = parseFloat(amountStr || '0');
 
+  const stopCamera = useCallback(() => {
+    scanLoopRef.current = 0;
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(t => t.stop());
+      streamRef.current = null;
+    }
+  }, []);
+
+  const startCamera = useCallback(async () => {
+    setScanError(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 480 } },
+      });
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
+      }
+
+      // Scan loop
+      const loopId = ++scanLoopRef.current;
+      const canvas = canvasRef.current;
+      const ctx = canvas?.getContext('2d', { willReadFrequently: true });
+      const tick = () => {
+        if (loopId !== scanLoopRef.current) return; // stale
+        const video = videoRef.current;
+        if (video && canvas && ctx && video.readyState >= 2) {
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
+          ctx.drawImage(video, 0, 0);
+          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const code = jsQR(imageData.data, canvas.width, canvas.height, { inversionAttempts: 'dontInvert' });
+          if (code?.data) {
+            const m = parseMerchantQR(code.data);
+            if (m) {
+              stopCamera();
+              setMerchant(m);
+              setStep('amount');
+              return;
+            }
+          }
+        }
+        requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    } catch {
+      setScanError('Camera access denied. Please allow camera permission.');
+    }
+  }, [stopCamera]);
+
+  useEffect(() => {
+    if (open && step === 'scanning') {
+      startCamera();
+    }
+    return () => { if (step === 'scanning') stopCamera(); };
+  }, [open, step, startCamera, stopCamera]);
+
   useEffect(() => {
     if (!open) {
+      stopCamera();
       setStep('scanning');
-      setScanProgress(0);
+      setScanError(null);
       setError(null);
       setMerchant(null);
       setAmountStr('');
-      return;
     }
-    if (step === 'scanning') {
-      // Simulate QR scan — picks a random demo merchant
-      const m = DEMO_QR_MERCHANTS[Math.floor(Math.random() * DEMO_QR_MERCHANTS.length)];
-      const timer = setTimeout(() => { setMerchant(m); setStep('amount'); }, 2200);
-      const progressTimer = setInterval(() => {
-        setScanProgress(p => Math.min(p + 5, 100));
-      }, 110);
-      return () => { clearTimeout(timer); clearInterval(progressTimer); };
-    }
-  }, [open, step]);
+  }, [open, stopCamera]);
 
   const handleClose = () => {
+    stopCamera();
     onOpenChange(false);
     setTimeout(() => {
       setStep('scanning');
-      setScanProgress(0);
+      setScanError(null);
       setError(null);
       setMerchant(null);
       setAmountStr('');
@@ -199,7 +250,7 @@ export function PoolScanPayDialog({ open, onOpenChange, pool }: PoolScanPayDialo
         onClick={e => e.stopPropagation()}
       >
 
-        {/* ── SCANNING ── */}
+        {/* ── SCANNING (real camera + jsQR) ── */}
         {step === 'scanning' && (
           <div>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '24px 20px 16px' }}>
@@ -215,7 +266,7 @@ export function PoolScanPayDialog({ open, onOpenChange, pool }: PoolScanPayDialo
             </div>
 
             {/* Pool mini card */}
-            <div style={{ margin: '0 20px 20px' }}>
+            <div style={{ margin: '0 20px 16px' }}>
               <div style={{
                 borderRadius: 16, padding: '14px 16px', position: 'relative', overflow: 'hidden',
                 background: hasPhoto ? '#1a1a1a' : cardBg,
@@ -238,48 +289,76 @@ export function PoolScanPayDialog({ open, onOpenChange, pool }: PoolScanPayDialo
               </div>
             </div>
 
-            {/* QR Viewport */}
-            <div style={{ margin: '0 20px 20px' }}>
+            {/* Camera viewport */}
+            <div style={{ margin: '0 20px 16px' }}>
               <div style={{
-                height: 220, borderRadius: 20, background: '#0A0A14',
+                height: 280, borderRadius: 20, background: '#0A0A14',
                 position: 'relative', overflow: 'hidden',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
               }}>
-                {[{ top: 12, left: 12 }, { top: 12, right: 12 }, { bottom: 12, left: 12 }, { bottom: 12, right: 12 }].map((pos, i) => (
+                {/* Live video feed */}
+                <video
+                  ref={videoRef}
+                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                  playsInline muted autoPlay
+                />
+                <canvas ref={canvasRef} style={{ display: 'none' }} />
+
+                {/* Corner brackets overlay */}
+                {[{ top: 20, left: 20 }, { top: 20, right: 20 }, { bottom: 20, left: 20 }, { bottom: 20, right: 20 }].map((pos, i) => (
                   <div key={i} style={{
                     position: 'absolute', ...pos,
-                    width: 24, height: 24,
-                    borderTop: i < 2 ? '2.5px solid #005AFF' : 'none',
-                    borderBottom: i >= 2 ? '2.5px solid #005AFF' : 'none',
-                    borderLeft: i === 0 || i === 2 ? '2.5px solid #005AFF' : 'none',
-                    borderRight: i === 1 || i === 3 ? '2.5px solid #005AFF' : 'none',
-                    borderRadius: i === 0 ? '4px 0 0 0' : i === 1 ? '0 4px 0 0' : i === 2 ? '0 0 0 4px' : '0 0 4px 0',
+                    width: 28, height: 28,
+                    borderTop: i < 2 ? '3px solid #005AFF' : 'none',
+                    borderBottom: i >= 2 ? '3px solid #005AFF' : 'none',
+                    borderLeft: i === 0 || i === 2 ? '3px solid #005AFF' : 'none',
+                    borderRight: i === 1 || i === 3 ? '3px solid #005AFF' : 'none',
+                    borderRadius: i === 0 ? '6px 0 0 0' : i === 1 ? '0 6px 0 0' : i === 2 ? '0 0 0 6px' : '0 0 6px 0',
                   }} />
                 ))}
+
+                {/* Animated scan line */}
                 <div className="scan-line" style={{
-                  position: 'absolute', left: 8, right: 8, height: 2,
+                  position: 'absolute', left: 16, right: 16, height: 2,
                   background: 'linear-gradient(90deg, transparent, #005AFF, transparent)',
-                  boxShadow: '0 0 8px rgba(0, 90, 255, 0.8)', borderRadius: 1,
+                  boxShadow: '0 0 12px rgba(0, 90, 255, 0.8)', borderRadius: 1,
                 }} />
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, opacity: 0.4 }}>
-                  <QrCode size={56} color="rgba(255,255,255,0.6)" />
-                  <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)', margin: 0, fontFamily: F }}>Point camera at merchant QR</p>
-                </div>
+
+                {/* Camera error fallback */}
+                {scanError && (
+                  <div style={{
+                    position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column',
+                    alignItems: 'center', justifyContent: 'center', background: '#0A0A14', gap: 12,
+                  }}>
+                    <Camera size={48} color="rgba(255,255,255,0.3)" />
+                    <p style={{ fontSize: 13, color: '#EF4444', margin: 0, fontFamily: F, textAlign: 'center', padding: '0 20px' }}>{scanError}</p>
+                    <button
+                      onClick={startCamera}
+                      style={{
+                        padding: '8px 20px', borderRadius: 999, border: '1px solid rgba(255,255,255,0.2)',
+                        background: 'rgba(255,255,255,0.1)', color: '#fff', fontSize: 13,
+                        cursor: 'pointer', fontFamily: F,
+                      }}
+                    >
+                      Retry
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
 
-            {/* Progress */}
-            <div style={{ padding: '0 20px 28px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-                <span style={{ fontSize: 12, color: '#6B7280', fontFamily: F }}>Scanning...</span>
-                <span style={{ fontSize: 12, fontWeight: 600, color: '#005AFF', fontFamily: F }}>{scanProgress}%</span>
+            {/* Instructions */}
+            <div style={{ padding: '0 20px 24px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                <QrCode size={16} color="#005AFF" />
+                <span style={{ fontSize: 13, color: '#374151', fontWeight: 600, fontFamily: F }}>Point camera at merchant QR code</span>
               </div>
-              <div style={{ height: 4, background: '#E5E7EB', borderRadius: 2, overflow: 'hidden' }}>
-                <div style={{ height: '100%', width: `${scanProgress}%`, background: '#005AFF', borderRadius: 2, transition: 'width 0.1s linear' }} />
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 12 }}>
+              <p style={{ fontSize: 11, color: '#9CA3AF', margin: '0 0 12px', fontFamily: F }}>
+                QR must contain: {`{"merchantId":"...","name":"...","category":"..."}`}
+              </p>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 <Shield size={13} color="#059669" />
-                <p style={{ fontSize: 11, color: '#059669', margin: 0, fontFamily: F }}>AI Scam Guard Active — Merchant being verified</p>
+                <p style={{ fontSize: 11, color: '#059669', margin: 0, fontFamily: F }}>AI Scam Guard Active — Merchant verified on scan</p>
               </div>
             </div>
           </div>

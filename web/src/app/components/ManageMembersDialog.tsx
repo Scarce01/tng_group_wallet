@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { AddMemberDialog } from './AddMemberDialog';
 import { ApprovalSettingsDialog } from './ApprovalSettingsDialog';
 import { AutoSplitRulesDialog } from './AutoSplitRulesDialog';
+import { QrInviteDialog } from './QrInviteDialog';
 
 interface Member {
   id: string;
@@ -16,6 +17,7 @@ interface ManageMembersDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   poolName: string;
+  poolId?: string;
   members: Member[];
   poolBalance: number;
   hasTransactions: boolean;
@@ -25,11 +27,13 @@ export function ManageMembersDialog({
   open,
   onOpenChange,
   poolName,
+  poolId,
   members,
   poolBalance,
   hasTransactions
 }: ManageMembersDialogProps) {
   const [showAddMember, setShowAddMember] = useState(false);
+  const [showQrInvite, setShowQrInvite] = useState(false);
   const [showApprovalSettings, setShowApprovalSettings] = useState(false);
   const [showAutoSplitRules, setShowAutoSplitRules] = useState(false);
   const [showDailyLimitSheet, setShowDailyLimitSheet] = useState(false);
@@ -221,6 +225,39 @@ export function ManageMembersDialog({
                 Add Contributor
               </span>
             </button>
+
+            {/* ── Generate QR Invite Button ── */}
+            {isCurrentUserAdmin && (
+              <button
+                onClick={() => setShowQrInvite(true)}
+                style={{
+                  position: 'relative',
+                  width: '100%',
+                  height: '48px',
+                  borderRadius: '24px',
+                  border: '1.5px solid #005AFF',
+                  background: '#fff',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px',
+                  flexShrink: 0,
+                }}
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#005AFF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="3" width="7" height="7" rx="1" />
+                  <rect x="14" y="3" width="7" height="7" rx="1" />
+                  <rect x="3" y="14" width="7" height="7" rx="1" />
+                  <rect x="14" y="14" width="3" height="3" />
+                  <path d="M21 14h-3v3" />
+                  <path d="M18 21v-3h3" />
+                </svg>
+                <span style={{ fontFamily: "'Inter', sans-serif", fontWeight: 600, fontSize: '14px', lineHeight: '20px', color: '#005AFF', whiteSpace: 'nowrap' }}>
+                  Generate QR Code
+                </span>
+              </button>
+            )}
 
             {/* ── Pending Invites ── */}
             {pendingInvites.length > 0 && (
@@ -783,6 +820,12 @@ export function ManageMembersDialog({
         onOpenChange={setShowAutoSplitRules}
         poolName={poolName}
         memberCount={joinedMembers.length}
+      />
+
+      <QrInviteDialog
+        open={showQrInvite}
+        onOpenChange={setShowQrInvite}
+        poolId={poolId}
       />
     </>
   );

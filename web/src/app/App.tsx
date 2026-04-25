@@ -20,6 +20,7 @@ import { ScamCheckPage } from './components/ScamCheckPage';
 import { PoolPage } from './components/PoolPage';
 import { FreezePoolSheet } from './components/FreezePoolSheet';
 import { SmartCallSheet } from './components/SmartCallSheet';
+import { QrScannerDialog } from './components/QrScannerDialog';
 import { Wallet, Plus, Users, TrendingUp, Bell, Settings, Shield, Gift, Home, GraduationCap, ShoppingCart, Zap, Building2, Utensils, Sparkles } from 'lucide-react';
 import svgPaths from '../imports/CardDetails/svg-3xzeber0v2';
 import navSvgPaths from '../imports/Container-3/svg-lc0haplezl';
@@ -170,6 +171,7 @@ export default function App() {
   const [showFreezeSheet, setShowFreezeSheet] = useState(false);
   const [showSmartCallSheet, setShowSmartCallSheet] = useState(false);
   const [contributeVotingPowerMode, setContributeVotingPowerMode] = useState(false);
+  const [showQrScanner, setShowQrScanner] = useState(false);
   const [appToast, setAppToast] = useState<string | null>(null);
 
   const showToast = (msg: string) => {
@@ -1527,9 +1529,7 @@ export default function App() {
         onCreatePool={handleCreatePool}
         onJoinGroup={() => {
           setShowCreatePool(false);
-          // Small delay so the bottom sheet finishes closing before we
-          // mount the full-screen scan view.
-          setTimeout(() => setActiveTab('scan'), 120);
+          setTimeout(() => setShowQrScanner(true), 120);
         }}
       />
 
@@ -1552,6 +1552,7 @@ export default function App() {
           if (!open) setSelectedPoolId(null);
         }}
         poolName={selectedPoolId ? pools.find(p => p.id === selectedPoolId)?.name || '' : pool.name}
+        poolId={selectedPoolId || pool.id}
         members={selectedPoolId ? pools.find(p => p.id === selectedPoolId)?.members || [] : pool.members}
         poolBalance={selectedPoolId ? pools.find(p => p.id === selectedPoolId)?.members.reduce((sum, m) => sum + m.contribution, 0) || 0 : totalContributed}
         hasTransactions={selectedPoolId ? transactions.filter(t => t.poolId === selectedPoolId).length > 0 : transactions.length > 0}
@@ -1652,6 +1653,11 @@ export default function App() {
           to { opacity: 1; transform: translateX(-50%) translateY(0); }
         }
       `}</style>
+
+      <QrScannerDialog
+        open={showQrScanner}
+        onOpenChange={setShowQrScanner}
+      />
     </div>
   );
 }

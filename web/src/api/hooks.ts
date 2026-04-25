@@ -497,6 +497,36 @@ export function useScamCheck() {
   });
 }
 
+// ----------------- QR Pool Invites -----------------
+
+export interface QrInviteResult {
+  inviteCode: string;
+  image: string;          // data:image/png;base64,...
+  expiresInSeconds: number;
+  expiresAt: string;
+}
+
+export function useGenerateQrInvite(poolId: string | undefined) {
+  return useMutation({
+    mutationFn: () =>
+      api<QrInviteResult>(`/pools/${poolId}/invites/qr`, { method: "POST" }),
+  });
+}
+
+export function useAcceptQrInvite() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { image: string }) =>
+      api<{ poolId: string; userId: string; role: string }>("/invites/qr-accept", {
+        method: "POST",
+        body,
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["pools"] });
+    },
+  });
+}
+
 // ----------------- Top up (demo helper) -----------------
 
 export function useTopup() {

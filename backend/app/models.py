@@ -70,6 +70,39 @@ class RefreshToken(Base):
     __table_args__ = (Index("RefreshToken_userId_idx", "userId"),)
 
 
+# Device-bind passwordless login. The web app submits a phone + a stable
+# browser/device fingerprint; the backend creates a challenge bound to all
+# of (phone, deviceId, appId, requestId, nonce, expiresAt). The TNG-side
+# mock_approval app fetches pending challenges, shows the binding details
+# to the user, and posts back an HMAC signature that proves the approval
+# came from the TNG side. Tokens are only issued after status flips to
+# APPROVED, the approver signature verifies, the row is unconsumed, and
+# the row hasn't expired — all four checked atomically per request.
+class DeviceBindChallenge(Base):
+    __tablename__ = "DeviceBindChallenge"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_id)
+    requestId: Mapped[str] = mapped_column(String, unique=True)
+    userId: Mapped[Optional[str]] = mapped_column(String, ForeignKey("User.id"), nullable=True)
+    phone: Mapped[str] = mapped_column(String)
+    deviceId: Mapped[str] = mapped_column(String)
+    deviceLabel: Mapped[str] = mapped_column(String, default="")
+    appId: Mapped[str] = mapped_column(String)
+    nonce: Mapped[str] = mapped_column(String)
+    challengeHash: Mapped[str] = mapped_column(String)
+    status: Mapped[str] = mapped_column(String, default="PENDING")
+    approverSig: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    expiresAt: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    createdAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    approvedAt: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    consumedAt: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index("DeviceBindChallenge_phone_status_idx", "phone", "status"),
+        Index("DeviceBindChallenge_expiresAt_idx", "expiresAt"),
+    )
+
+
 class Pool(Base):
     __tablename__ = "Pool"
 

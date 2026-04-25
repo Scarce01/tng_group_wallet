@@ -68,6 +68,102 @@ export function useQrLogin() {
   });
 }
 
+// ---- Device-bind passwordless login ---------------------------------------
+// Phone-only login. The browser submits a stable per-browser deviceId; the
+// backend creates a bound challenge; the user opens the TNG mock_approval
+// app and taps Approve, which posts an HMAC signature back to the backend.
+// `useDeviceBindLogin` polls /auth/device-bind/status until terminal.
+
+const DEVICE_ID_KEY = "tng_device_id";
+
+export function getOrCreateDeviceId(): string {
+  let id = localStorage.getItem(DEVICE_ID_KEY);
+  if (!id) {
+    // Stable per-browser id so successive logins from the same browser
+    // present the same fingerprint to TNG. Not a hardware id — the
+    // user can clear it from devtools, which is fine for the demo.
+    id = "dev_" + crypto.randomUUID();
+    localStorage.setItem(DEVICE_ID_KEY, id);
+  }
+  return id;
+}
+
+export function getDeviceLabel(): string {
+  if (typeof navigator === "undefined") return "Web browser";
+  const ua = navigator.userAgent || "";
+  // Cheap UA-based label — good enough for the approval screen.
+  if (/iPhone|iPad|iPod/i.test(ua)) return "iOS Safari";
+  if (/Android/i.test(ua)) return "Android browser";
+  if (/Chrome\//.test(ua)) return "Chrome on " + (navigator.platform || "desktop");
+  if (/Firefox\//.test(ua)) return "Firefox on " + (navigator.platform || "desktop");
+  if (/Safari\//.test(ua)) return "Safari on " + (navigator.platform || "desktop");
+  return "Web browser";
+}
+
+export interface DeviceBindChallenge {
+  requestId: string;
+  phone: string;
+  deviceId: string;
+  deviceLabel: string;
+  appId: string;
+  nonce: string;
+  status: "PENDING" | "APPROVED" | "REJECTED" | "EXPIRED" | "CONSUMED";
+  expiresAt: string;
+  createdAt: string;
+  expiresInSeconds: number;
+  session?: AuthResult;
+}
+
+export function useDeviceBindLogin() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (vars: { phone: string }) => {
+      const deviceId = getOrCreateDeviceId();
+      const deviceLabel = getDeviceLabel();
+      const appId = "tng-group-wallet-web";
+
+      const challenge = await api<DeviceBindChallenge>(
+        "/auth/device-bind/initiate",
+        {
+          method: "POST",
+          body: { phone: vars.phone, deviceId, deviceLabel, appId },
+          noAuth: true,
+        },
+      );
+
+      const deadline = Date.now() + challenge.expiresInSeconds * 1000;
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        await new Promise((r) => setTimeout(r, 1500));
+        if (Date.now() > deadline + 2000) {
+          throw new Error("Approval window expired. Please try again.");
+        }
+        const status = await api<DeviceBindChallenge>(
+          `/auth/device-bind/status/${challenge.requestId}`,
+          { method: "POST", body: { deviceId }, noAuth: true },
+        );
+        if (status.status === "APPROVED" && status.session) {
+          return { challenge, auth: status.session };
+        }
+        if (status.status === "REJECTED") {
+          throw new Error("You rejected the login on the TNG app.");
+        }
+        if (status.status === "EXPIRED") {
+          throw new Error("Approval expired. Please try again.");
+        }
+        if (status.status === "CONSUMED") {
+          throw new Error("This challenge was already used. Please try again.");
+        }
+      }
+    },
+    onSuccess: ({ auth }) => {
+      tokens.setSession(auth.accessToken, auth.refreshToken, auth.user);
+      qc.setQueryData(["me"], auth.user);
+      qc.invalidateQueries();
+    },
+  });
+}
+
 export function useLogout() {
   const qc = useQueryClient();
   return useMutation({

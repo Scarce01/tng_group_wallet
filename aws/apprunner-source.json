@@ -1,0 +1,25 @@
+{
+  "AuthenticationConfiguration": {
+    "ConnectionArn": "arn:aws:apprunner:ap-southeast-1:724413959651:connection/tng_group_wallet/6df39ded0ec74546b48d9e33873d1703"
+  },
+  "AutoDeploymentsEnabled": true,
+  "CodeRepository": {
+    "RepositoryUrl": "https://github.com/Scarce01/tng_group_wallet",
+    "SourceDirectory": "backend",
+    "SourceCodeVersion": { "Type": "BRANCH", "Value": "main" },
+    "CodeConfiguration": {
+      "ConfigurationSource": "API",
+      "CodeConfigurationValues": {
+        "Runtime": "DOCKER",
+        "Port": "8000",
+        "BuildCommand": "",
+        "StartCommand": "sh -c \"uvicorn app.main:app --host 0.0.0.0 --port ${PORT}\"",
+        "RuntimeEnvironmentVariables": {
+          "NODE_ENV": "production",
+          "LOG_LEVEL": "info",
+          "CORS_ORIGINS": "*"
+        }
+      }
+    }
+  }
+}

@@ -19,8 +19,9 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 
 from .serialize import jsonable as _jsonable
 from .config import cors_origin_allowed, env
-from .db import SessionLocal
+from .db import SessionLocal, engine
 from .errors import AppError
+from .models import Base, DeviceBindChallenge
 from .pubsub import pubsub
 from .routes import agent as agent_routes
 from .routes import auth as auth_routes
@@ -72,8 +73,25 @@ async def _security_headers_mw(request: Request, call_next):
 
 
 # ---------------- lifespan: bg expiry sweep + pubsub dispatcher ----------------
+async def _ensure_runtime_tables() -> None:
+    """Idempotent create-if-missing for tables added after the original
+    bootstrap. Lets us ship new auth tables (DeviceBindChallenge) without
+    forcing operators to re-run `python -m app.bootstrap` (which drops
+    all data). Existing tables are untouched."""
+    async with engine.begin() as conn:
+        await conn.run_sync(
+            Base.metadata.create_all,
+            tables=[DeviceBindChallenge.__table__],
+            checkfirst=True,
+        )
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    try:
+        await _ensure_runtime_tables()
+    except Exception as e:
+        log.warning("runtime table ensure failed: %s", e)
     await setup_pubsub_dispatcher()
     stop = asyncio.Event()
 

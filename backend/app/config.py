@@ -35,6 +35,9 @@ class _Env:
     JWT_REFRESH_EXPIRES_S: int
     CORS_ORIGINS: str
     WS_PATH: str
+    DEVICE_BIND_SECRET: str
+    TNG_APPROVER_KEY: str
+    DEVICE_BIND_TTL_S: int
 
     def __init__(self) -> None:
         self.NODE_ENV = os.getenv("NODE_ENV", "development")
@@ -57,6 +60,15 @@ class _Env:
         self.JWT_REFRESH_EXPIRES_S = _parse_duration_seconds(os.getenv("JWT_REFRESH_EXPIRES_IN", "7d"))
         self.CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*")
         self.WS_PATH = os.getenv("WS_PATH", "/ws")
+        # Device-bind login secrets. Default to dev keys so the demo runs
+        # out-of-the-box; production .env MUST override both.
+        self.DEVICE_BIND_SECRET = os.getenv(
+            "DEVICE_BIND_SECRET", "dev-device-bind-secret-change-me-32b"
+        )
+        self.TNG_APPROVER_KEY = os.getenv(
+            "TNG_APPROVER_KEY", "dev-tng-approver-key-change-me-32b!!"
+        )
+        self.DEVICE_BIND_TTL_S = int(os.getenv("DEVICE_BIND_TTL_SECONDS", "120"))
 
 
 def _to_async_db_url(url: str) -> str:

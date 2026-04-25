@@ -9,7 +9,8 @@ from ..errors import Errors
 from ..rate_limit import auth_limiter
 from ..schemas.auth import LoginIn, RefreshIn, RegisterIn
 from ..schemas.common import StrictBase
-from ..services import auth_service
+from ..schemas.device_bind import ApproveIn, InitiateIn, RejectIn
+from ..services import auth_service, device_bind_service
 from ..services.qr_auth_service import issue_qr_for_user, login_with_qr
 
 router = APIRouter()
@@ -101,3 +102,68 @@ async def qr_login(req: Request, resp: Response,
 
     user = await login_with_qr(session, image_bytes=image_bytes)
     return await auth_service._issue_tokens(session, user)
+
+
+# ---- Device-bind passwordless login ---------------------------------------
+# Replaces the PIN-based path on the web app:
+#   1. POST /auth/device-bind/initiate {phone, deviceId, ...}
+#      -> creates a challenge bound to the full tuple, returns requestId.
+#   2. The mock_approval Flutter app (the "TNG side") fetches
+#      GET /auth/device-bind/pending?phone=... to render the approval inbox,
+#      then POSTs /auth/device-bind/approve with an HMAC signature proving
+#      the click came from the TNG side.
+#   3. The web app polls POST /auth/device-bind/status to claim a session
+#      once the challenge is approved. First poll wins; row is consumed.
+
+
+@router.post("/device-bind/initiate")
+async def device_bind_initiate(body: InitiateIn, req: Request, resp: Response,
+                               session: AsyncSession = Depends(get_session)):
+    auth_limiter.check(req, resp)
+    return await device_bind_service.initiate(
+        session,
+        phone=body.phone,
+        device_id=body.deviceId,
+        device_label=body.deviceLabel,
+        app_id=body.appId,
+    )
+
+
+class DeviceBindStatusIn(StrictBase):
+    deviceId: str
+
+
+@router.post("/device-bind/status/{request_id}")
+async def device_bind_status(request_id: str, body: DeviceBindStatusIn,
+                             session: AsyncSession = Depends(get_session)):
+    return await device_bind_service.get_status(
+        session, request_id=request_id, device_id=body.deviceId,
+    )
+
+
+@router.get("/device-bind/pending")
+async def device_bind_pending(phone: str,
+                              session: AsyncSession = Depends(get_session)):
+    # No PIN, no auth — by design. The pending list only reveals public
+    # binding details; tokens still require an HMAC-signed approval.
+    items = await device_bind_service.pending_for_phone(session, phone=phone)
+    return {"items": items}
+
+
+@router.post("/device-bind/approve")
+async def device_bind_approve(body: ApproveIn,
+                              session: AsyncSession = Depends(get_session)):
+    return await device_bind_service.approve(
+        session,
+        request_id=body.requestId,
+        device_id=body.deviceId,
+        approver_sig=body.approverSig,
+    )
+
+
+@router.post("/device-bind/reject")
+async def device_bind_reject(body: RejectIn,
+                             session: AsyncSession = Depends(get_session)):
+    return await device_bind_service.reject(
+        session, request_id=body.requestId, device_id=body.deviceId,
+    )

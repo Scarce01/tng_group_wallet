@@ -26,6 +26,7 @@ import logging
 import os
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 
@@ -108,7 +109,7 @@ def lambda_handler(event, _ctx):
         return _resp(400, {"error": "missing fields (requestId, deviceId, approverSig, phone)"})
 
     # 1. Find the pending challenge for this phone.
-    code, body = _http("GET", f"/api/v1/auth/device-bind/pending?phone={phone}")
+    code, body = _http("GET", f"/api/v1/auth/device-bind/pending?phone={urllib.parse.quote_plus(phone)}")
     if code != 200:
         _emit("BackendError")
         return _resp(502, {"error": "backend unavailable"})

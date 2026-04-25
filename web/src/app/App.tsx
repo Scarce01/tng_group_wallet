@@ -594,6 +594,7 @@ export default function App() {
               const activeTransactions = transactions.filter(t => t.poolId === activePool.id);
               const income = activePool.members.reduce((s, m) => s + m.contribution, 0) || activePool.currentBalance + 200;
               const used = activeTransactions.filter(t => t.type === 'spending').reduce((s, t) => s + t.amount, 0) || 150;
+              const displayBalance = income - used;
               const percentage = Math.min((used / (income || 1)) * 100, 100);
 
               return (
@@ -793,7 +794,7 @@ export default function App() {
                             </div>
                             <div className="flex items-center justify-between pt-2" style={{ borderTop: '0.8px solid #F3F4F6' }}>
                               <span className="text-xs font-bold" style={{ color: '#1A1A1A', fontFamily: 'Inter, sans-serif' }}>Current Balance</span>
-                              <span className="font-bold" style={{ color: '#005AFF', fontFamily: 'Inter, sans-serif', fontSize: '18px' }}>RM {activePool.currentBalance.toFixed(2)}</span>
+                              <span className="font-bold" style={{ color: '#005AFF', fontFamily: 'Inter, sans-serif', fontSize: '18px' }}>RM {displayBalance.toFixed(2)}</span>
                             </div>
                           </div>
                         </div>

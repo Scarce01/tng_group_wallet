@@ -193,12 +193,11 @@ def create_app() -> FastAPI:
     # --- WebSocket ---
     app.add_api_websocket_route(env.WS_PATH, websocket_endpoint)
 
-    # --- Static SPA: web/dist preferred, fall back to public/ ---
+    # --- Static SPA: serves the React build from web/dist ---
     project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
     web_dist = os.path.join(project_root, "web", "dist")
-    public_dir = os.path.join(project_root, "public")
 
-    spa_dirs = [d for d in (web_dist, public_dir) if os.path.isdir(d)]
+    spa_dirs = [web_dist] if os.path.isdir(web_dist) else []
     if spa_dirs:
         primary = spa_dirs[0]
 

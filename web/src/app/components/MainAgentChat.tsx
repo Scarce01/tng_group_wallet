@@ -276,6 +276,18 @@ function WidgetRenderer({
       return <PoolSelector widget={widget} onPick={onAction} />;
     case 'vote':
       return <VoteCard widget={widget} onVote={onAction} />;
+    // Data viz widgets
+    case 'transaction_table':
+    case 'transaction_history':  // LLM alias
+      return <TransactionTable widget={widget} />;
+    case 'data_table':
+      return <DataTable widget={widget} />;
+    case 'bar_chart':
+      return <BarChart widget={widget} />;
+    case 'line_chart':
+      return <LineChart widget={widget} />;
+    case 'metric_grid':
+      return <MetricGrid widget={widget} />;
     default:
       // Unknown widget — show JSON so it's visible during dev
       return (
@@ -443,6 +455,242 @@ function voteBtnStyle(color: string, bg: string): React.CSSProperties {
     flex: 1, background: bg, border: `1px solid ${color}40`, color,
     borderRadius: 10, padding: '6px 10px', fontWeight: 700, fontSize: 12,
     cursor: 'pointer',
+  };
+}
+
+// ─────────────────────── Data viz widgets ────────────────────────────────
+
+interface TxRow {
+  description?: string;
+  amount?: number | string;
+  direction?: string; // 'IN' / 'OUT'
+  type?: string;
+  person?: string;
+  user?: { displayName?: string };
+  date?: string;
+  createdAt?: string;
+}
+
+function TransactionTable({ widget }: { widget: MainAgentWidget }) {
+  const items =
+    (widget.items as TxRow[]) ??
+    (widget.data as TxRow[]) ??
+    (widget.transactions as TxRow[]) ??
+    [];
+  const title = String(widget.title ?? 'Transactions');
+  return (
+    <div style={dataCardStyle()}>
+      <p style={dataTitleStyle()}>{title}</p>
+      {items.length === 0 ? (
+        <p style={{ margin: 0, fontSize: 12, color: '#94A3B8' }}>No transactions.</p>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column' }}>
+          {items.map((t, i) => {
+            const amt = Number(t.amount ?? 0);
+            const isOut = t.direction === 'OUT' || t.type === 'SPEND';
+            const sign = isOut ? '−' : '+';
+            const color = isOut ? '#EF4444' : '#16A34A';
+            const date = t.date ?? t.createdAt ?? '';
+            const who = t.person ?? t.user?.displayName ?? '';
+            return (
+              <div key={i} style={{
+                display: 'flex', justifyContent: 'space-between',
+                padding: '8px 0', borderBottom: i < items.length - 1 ? '1px solid #F3F4F6' : 'none',
+                alignItems: 'flex-start', gap: 8,
+              }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{ margin: 0, fontSize: 12, fontWeight: 600, color: '#0A0A0A', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {String(t.description ?? 'Transaction')}
+                  </p>
+                  <p style={{ margin: '2px 0 0', fontSize: 10, color: '#6B7280' }}>
+                    {who && <span>{who}</span>}
+                    {who && date && <span> · </span>}
+                    {date && <span>{formatTxDate(date)}</span>}
+                  </p>
+                </div>
+                <span style={{ fontSize: 12, fontWeight: 700, color, whiteSpace: 'nowrap' }}>
+                  {sign}RM{amt.toFixed(2)}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function formatTxDate(s: string): string {
+  const d = new Date(s);
+  if (isNaN(d.getTime())) return s;
+  return d.toLocaleDateString('en-MY', { day: 'numeric', month: 'short' }) +
+    ', ' + d.toLocaleTimeString('en-MY', { hour: 'numeric', minute: '2-digit', hour12: true });
+}
+
+interface ChartPoint { label: string; value: number }
+
+function BarChart({ widget }: { widget: MainAgentWidget }) {
+  const data = (widget.data as ChartPoint[]) ?? [];
+  const title = String(widget.title ?? 'Bar Chart');
+  const unit = String(widget.unit ?? 'RM');
+  const max = Math.max(1, ...data.map((d) => Number(d.value) || 0));
+  return (
+    <div style={dataCardStyle()}>
+      <p style={dataTitleStyle()}>{title}</p>
+      {data.length === 0 ? (
+        <p style={{ margin: 0, fontSize: 12, color: '#94A3B8' }}>No data.</p>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {data.map((d, i) => {
+            const v = Number(d.value) || 0;
+            const pct = (v / max) * 100;
+            return (
+              <div key={i}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: '#374151', marginBottom: 2 }}>
+                  <span>{d.label}</span>
+                  <span style={{ fontWeight: 600 }}>{unit} {v.toFixed(2)}</span>
+                </div>
+                <div style={{ background: '#F3F4F6', borderRadius: 6, height: 8 }}>
+                  <div style={{
+                    width: `${pct}%`,
+                    height: '100%',
+                    background: 'linear-gradient(90deg,#005AFF,#4DA3FF)',
+                    borderRadius: 6,
+                    transition: 'width 0.3s',
+                  }} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LineChart({ widget }: { widget: MainAgentWidget }) {
+  const data = (widget.data as ChartPoint[]) ?? [];
+  const title = String(widget.title ?? 'Trend');
+  const unit = String(widget.unit ?? 'RM');
+  const W = 280, H = 120, P = 24;
+  const max = Math.max(1, ...data.map((d) => Number(d.value) || 0));
+  const min = Math.min(0, ...data.map((d) => Number(d.value) || 0));
+  const range = max - min || 1;
+  const xStep = data.length > 1 ? (W - P * 2) / (data.length - 1) : 0;
+  const points = data.map((d, i) => {
+    const x = P + i * xStep;
+    const y = H - P - ((Number(d.value) || 0) - min) / range * (H - P * 2);
+    return { x, y, value: Number(d.value) || 0, label: d.label };
+  });
+  const path = points.map((p, i) => (i === 0 ? `M${p.x},${p.y}` : `L${p.x},${p.y}`)).join(' ');
+  const area = path + ` L${points.at(-1)?.x ?? P},${H - P} L${points[0]?.x ?? P},${H - P} Z`;
+
+  return (
+    <div style={dataCardStyle()}>
+      <p style={dataTitleStyle()}>{title}</p>
+      {data.length === 0 ? (
+        <p style={{ margin: 0, fontSize: 12, color: '#94A3B8' }}>No data.</p>
+      ) : (
+        <>
+          <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: 'block' }}>
+            <path d={area} fill="rgba(0,90,255,0.10)" />
+            <path d={path} fill="none" stroke="#005AFF" strokeWidth="1.8" strokeLinejoin="round" strokeLinecap="round" />
+            {points.map((p, i) => (
+              <g key={i}>
+                <circle cx={p.x} cy={p.y} r="3" fill="#005AFF" />
+                <text x={p.x} y={H - 4} fontSize="9" textAnchor="middle" fill="#6B7280">
+                  {String(p.label).slice(0, 6)}
+                </text>
+              </g>
+            ))}
+          </svg>
+          <p style={{ margin: 0, fontSize: 10, color: '#6B7280', textAlign: 'right' }}>
+            unit: {unit}
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
+function DataTable({ widget }: { widget: MainAgentWidget }) {
+  const cols = (widget.columns as string[]) ?? [];
+  const rows = (widget.rows as Array<Record<string, unknown>>) ?? [];
+  const title = String(widget.title ?? 'Data');
+  return (
+    <div style={dataCardStyle()}>
+      <p style={dataTitleStyle()}>{title}</p>
+      {rows.length === 0 ? (
+        <p style={{ margin: 0, fontSize: 12, color: '#94A3B8' }}>Empty.</p>
+      ) : (
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', fontSize: 11, borderCollapse: 'collapse' }}>
+            <thead>
+              <tr>
+                {cols.map((c) => (
+                  <th key={c} style={{ textAlign: 'left', padding: '4px 8px', color: '#6B7280', fontWeight: 600, borderBottom: '1px solid #E5E7EB' }}>
+                    {c}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r, i) => (
+                <tr key={i}>
+                  {cols.map((c) => (
+                    <td key={c} style={{ padding: '4px 8px', borderBottom: i < rows.length - 1 ? '1px solid #F9FAFB' : 'none', color: '#0A0A0A' }}>
+                      {String(r[c] ?? '')}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MetricGrid({ widget }: { widget: MainAgentWidget }) {
+  const metrics = (widget.metrics as Array<{ label: string; value: string | number; unit?: string }>) ?? [];
+  return (
+    <div style={dataCardStyle()}>
+      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.min(metrics.length, 3)}, 1fr)`, gap: 8 }}>
+        {metrics.map((m, i) => (
+          <div key={i} style={{ background: '#F8FAFC', borderRadius: 8, padding: 8, textAlign: 'center' }}>
+            <p style={{ margin: 0, fontSize: 10, color: '#6B7280', textTransform: 'uppercase', letterSpacing: 0.4 }}>
+              {m.label}
+            </p>
+            <p style={{ margin: '4px 0 0', fontSize: 16, fontWeight: 800, color: '#005AFF' }}>
+              {m.unit ? `${m.unit} ` : ''}{m.value}
+            </p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function dataCardStyle(): React.CSSProperties {
+  return {
+    alignSelf: 'flex-start',
+    width: '95%',
+    maxWidth: '95%',
+    background: '#fff',
+    border: '1.5px solid #E5E7EB',
+    borderRadius: 12,
+    padding: 12,
+    fontFamily: 'Inter, sans-serif',
+  };
+}
+
+function dataTitleStyle(): React.CSSProperties {
+  return {
+    margin: '0 0 10px',
+    fontSize: 13,
+    fontWeight: 700,
+    color: '#0A0A0A',
   };
 }
 

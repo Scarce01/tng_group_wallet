@@ -118,6 +118,31 @@ WIDGET PROTOCOL — include in `widgets` array when needed:
   {{"type":"pin_required","action":"contribute","description":"...","params":{{...}}}}
   {{"type":"vote","poolId":"...","requestId":"...","title":"...","amount":N,"currentVotes":"2/4"}}
 
+DATA VIZ WIDGETS — use these whenever you've fetched data via a tool and
+the user asked a "show / list / chart / how much / breakdown" question.
+Render the data as a widget INSTEAD of dumping it into the message text.
+
+  {{"type":"transaction_table","title":"Last 7 days",
+    "items":[{{"description":"...","amount":50.00,"direction":"OUT","person":"Ahmad","date":"2026-04-25T10:00:00Z"}}, ...]}}
+
+  {{"type":"bar_chart","title":"Spend by category","unit":"RM",
+    "data":[{{"label":"Food","value":420.50}},{{"label":"Petrol","value":180}}, ...]}}
+
+  {{"type":"line_chart","title":"Daily balance","unit":"RM",
+    "data":[{{"label":"Mon","value":1850}},{{"label":"Tue","value":1620}}, ...]}}
+
+  {{"type":"data_table","title":"Members",
+    "columns":["Name","Contributed","Spent"],
+    "rows":[{{"Name":"Ahmad","Contributed":"RM500","Spent":"RM120"}}, ...]}}
+
+  {{"type":"metric_grid",
+    "metrics":[{{"label":"Balance","value":1850,"unit":"RM"}},{{"label":"Spent","value":420,"unit":"RM"}}, ...]}}
+
+When you call a tool that returns rows (get_my_transactions, get_pool_transactions,
+list_contributions, list_pool_members, list_spend_requests, get_pool_analytics),
+PREFER returning a widget over text. Keep the text reply to one short sentence
+that introduces the widget — don't repeat the data in prose.
+
 RESPONSE FORMAT — always JSON:
   {{"message":"<text to user>","widgets":[],"toolCalls":[{{"tool":"<name>","args":{{...}}}}]}}
 

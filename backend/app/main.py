@@ -90,12 +90,38 @@ async def _ensure_runtime_tables() -> None:
         )
 
 
+async def _reset_main_agent_conversations() -> None:
+    """Mark all AgentConversation rows isActive=False on each server boot.
+
+    The next /agent/message request will create a fresh row, so users start
+    every server session with a clean slate. History rows are kept (just
+    deactivated) so we can always go back and inspect them via DB if needed.
+    Without this, stale turns in the active conversation kept poisoning
+    the LLM (e.g. it would copy a previous pool_selector even after the
+    prompt rules forbade it).
+    """
+    from sqlalchemy import update
+    from .models import AgentConversation
+    async with SessionLocal() as s:
+        result = await s.execute(
+            update(AgentConversation)
+            .where(AgentConversation.isActive.is_(True))
+            .values(isActive=False)
+        )
+        await s.commit()
+        log.info("deactivated %d active main-agent conversations on boot", result.rowcount)
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     try:
         await _ensure_runtime_tables()
     except Exception as e:
         log.warning("runtime table ensure failed: %s", e)
+    try:
+        await _reset_main_agent_conversations()
+    except Exception as e:
+        log.warning("main-agent conversation reset failed: %s", e)
     await setup_pubsub_dispatcher()
     stop = asyncio.Event()
 

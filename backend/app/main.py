@@ -21,7 +21,7 @@ from .serialize import jsonable as _jsonable
 from .config import cors_origin_allowed, env
 from .db import SessionLocal, engine
 from .errors import AppError
-from .models import Base, DeviceBindChallenge
+from .models import AgentConversation, Base, DeviceBindChallenge
 from .pubsub import pubsub
 from .routes import agent as agent_routes
 from .routes import auth as auth_routes
@@ -82,7 +82,10 @@ async def _ensure_runtime_tables() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(
             Base.metadata.create_all,
-            tables=[DeviceBindChallenge.__table__],
+            tables=[
+                DeviceBindChallenge.__table__,
+                AgentConversation.__table__,
+            ],
             checkfirst=True,
         )
 

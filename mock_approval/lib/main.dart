@@ -23,9 +23,14 @@ import 'package:http/http.dart' as http;
 
 const String kBackendBaseUrl = String.fromEnvironment(
   'BACKEND_BASE_URL',
-  // Reasonable defaults: web/desktop hits localhost; Android emulator users
-  // should rebuild with --dart-define=BACKEND_BASE_URL=http://10.0.2.2:4000
-  defaultValue: 'http://localhost:4000',
+  defaultValue: 'http://47.128.148.79:8000',
+);
+
+// Lambda approve-gate URL (API Gateway). Only the /approve call goes here;
+// pending + reject still hit the backend directly.
+const String kLambdaApproveUrl = String.fromEnvironment(
+  'LAMBDA_APPROVE_URL',
+  defaultValue: 'https://svzzb7sm2h.execute-api.ap-southeast-1.amazonaws.com/approve',
 );
 
 const String kTngApproverKey = String.fromEnvironment(
@@ -147,7 +152,7 @@ class ApprovalApi {
   }
 
   static Future<void> approve(DeviceBindChallenge c) async {
-    final uri = Uri.parse('$kBackendBaseUrl/api/v1/auth/device-bind/approve');
+    final uri = Uri.parse(kLambdaApproveUrl);
     final r = await http.post(
       uri,
       headers: {'content-type': 'application/json'},
@@ -155,6 +160,7 @@ class ApprovalApi {
         'requestId': c.requestId,
         'deviceId': c.deviceId,
         'approverSig': approverSig(c),
+        'phone': c.phone,
       }),
     );
     if (r.statusCode != 200) {

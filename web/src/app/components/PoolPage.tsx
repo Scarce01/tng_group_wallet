@@ -7,7 +7,38 @@ import {
 import { PoolScanPayDialog } from './PoolScanPayDialog';
 import { AiAdvisorDialog } from './AiAdvisorDialog';
 import { AiAdvisorIcon } from './AiAdvisorIcon';
-import { useAgentBrief } from '../../api/hooks';
+import { useAgentBrief, useAgentContext } from '../../api/hooks';
+
+/** Local storage key for "user dismissed today's tip for this pool". */
+function dismissalKey(poolId: string): string {
+  return `tng_advice_dismissed_${poolId}`;
+}
+function todayStr(): string {
+  return new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+}
+
+/** Map an Open-Meteo weather code or condition string to a single emoji. */
+function weatherEmoji(weather: unknown): string | null {
+  if (!weather || typeof weather !== 'object') return null;
+  const w = weather as { code?: number; condition?: string; description?: string };
+  const code = w.code;
+  if (typeof code === 'number') {
+    if (code === 0) return '☀️';
+    if (code <= 3) return '⛅';
+    if (code <= 48) return '🌫️';
+    if (code <= 67) return '🌧️';
+    if (code <= 77) return '❄️';
+    if (code <= 82) return '🌧️';
+    if (code <= 99) return '⛈️';
+  }
+  const text = (w.condition ?? w.description ?? '').toString().toLowerCase();
+  if (/storm|thunder/.test(text)) return '⛈️';
+  if (/rain|shower|drizzle/.test(text)) return '🌧️';
+  if (/snow/.test(text)) return '❄️';
+  if (/cloud/.test(text)) return '⛅';
+  if (/clear|sun/.test(text)) return '☀️';
+  return null;
+}
 
 export interface PoolMember {
   id: string;
@@ -97,16 +128,23 @@ export function PoolPage({
   const [showAllCards, setShowAllCards] = useState(false);
   const [showScanPay, setShowScanPay] = useState(false);
   const [showAiAdvisor, setShowAiAdvisor] = useState(false);
-  const [adviceDismissed, setAdviceDismissed] = useState(false);
+  // "Daily" dismissal — stored as YYYY-MM-DD in localStorage so the card
+  // pops back the next calendar day.
+  const [dismissedDate, setDismissedDate] = useState<string | null>(null);
 
   // Active pool reference for the proactive advice card. Computed inline so
   // it's available before the activePool variable proper (further down).
   const activePoolForAdvice = pools[activeIndex];
   const briefQuery = useAgentBrief(activePoolForAdvice?.id);
-  // Reset dismiss when switching pools
+  const contextQuery = useAgentContext(activePoolForAdvice?.id);
+
+  // Hydrate dismissal state from localStorage when pool changes
   useEffect(() => {
-    setAdviceDismissed(false);
+    if (!activePoolForAdvice) return;
+    const stored = localStorage.getItem(dismissalKey(activePoolForAdvice.id));
+    setDismissedDate(stored);
   }, [activePoolForAdvice?.id]);
+
   const adviceText = (() => {
     const raw = briefQuery.data?.brief ?? briefQuery.data?.text ?? briefQuery.data?.answer;
     if (!raw) return null;
@@ -114,6 +152,15 @@ export function PoolPage({
     const first = raw.split(/(?<=[.!?])\s+/)[0]?.trim();
     return first && first.length > 0 ? first : null;
   })();
+
+  const weatherIcon = weatherEmoji(contextQuery.data?.weather);
+  const isDismissedToday = dismissedDate === todayStr();
+  const handleDismissAdvice = () => {
+    if (!activePoolForAdvice) return;
+    const today = todayStr();
+    localStorage.setItem(dismissalKey(activePoolForAdvice.id), today);
+    setDismissedDate(today);
+  };
   const touchStartX = useRef<number | null>(null);
   const isAnimating = useRef(false);
 
@@ -767,18 +814,22 @@ export function PoolPage({
               }
             `}
           </style>
-          {adviceText && !adviceDismissed && !showAiAdvisor && (
+          {adviceText && !isDismissedToday && !showAiAdvisor && (
             <div
               className="ai-advice-card"
               onClick={() => setShowAiAdvisor(true)}
               role="button"
               aria-label="Open AI advisor"
             >
-              {adviceText}
+              <span>
+                {weatherIcon && <span style={{ marginRight: 6 }}>{weatherIcon}</span>}
+                {adviceText}
+              </span>
               <button
                 className="ai-advice-card-dismiss"
-                onClick={(e) => { e.stopPropagation(); setAdviceDismissed(true); }}
-                aria-label="Dismiss advice"
+                onClick={(e) => { e.stopPropagation(); handleDismissAdvice(); }}
+                aria-label="Dismiss for today"
+                title="Dismiss for today (will return tomorrow)"
               >
                 ×
               </button>

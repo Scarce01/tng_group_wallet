@@ -25,6 +25,7 @@ from .memory import (
     record_agent_message,
     upsert_pool_memory,
 )
+from .bocpd_service import changepoint_for_pool
 from .ml import (
     anomaly_status,
     classifier_status,
@@ -383,6 +384,14 @@ async def gather_ml_signals(session: AsyncSession, pool_id: str) -> dict[str, An
     else:
         out["classifier"] = {"loaded": False, "reason": cls_status.get("loadError")}
 
+    # ── BOCPD: detect regime changepoints in the chronological spend stream
+    chrono_for_bocpd = sorted(txs, key=lambda t: t.createdAt)
+    bocpd_input = [
+        {"id": t.id, "amount": float(t.amount or 0), "created_at": t.createdAt}
+        for t in chrono_for_bocpd
+    ]
+    out["bocpd"] = changepoint_for_pool(pool_id, chronological_tx=bocpd_input)
+
     # ── Anomaly: flag outliers in the (chronological) tx stream
     if ano_status["loaded"]:
         # Anomaly model needs chronological order
@@ -414,11 +423,17 @@ async def gather_ml_signals(session: AsyncSession, pool_id: str) -> dict[str, An
 
 
 def _format_ml_for_prompt(signals: dict[str, Any]) -> str:
-    """Render ML signals as a compact human-readable block for the LLM."""
+    """Render ML/changepoint signals as a compact block for the LLM.
+
+    Per the agent spec, signals are *evidence* — the LLM should follow the
+    "stay silent unless it matters" rules from prompts.py and only act on
+    these findings when they cross the spec's thresholds.
+    """
     if not signals.get("available"):
         return "Local ML models: not loaded (skipping signals)."
 
-    parts = ["Local ML signals (computed live from this pool's transactions):"]
+    parts = ["Live signals from this pool's transactions:"]
+
     cls = signals.get("classifier", {})
     if cls.get("loaded") and cls.get("sample"):
         parts.append("  Top spends classified by DistilBERT:")
@@ -426,17 +441,32 @@ def _format_ml_for_prompt(signals: dict[str, Any]) -> str:
             parts.append(
                 f"    - RM {s['amount']:.2f} '{s['description']}' → {s['predictedCategory']} ({s['confidence']:.0%})"
             )
+
     ano = signals.get("anomaly", {})
     if ano.get("loaded"):
         n = len(ano.get("anomalies", []))
         if n == 0:
-            parts.append(f"  Anomaly model scanned {ano.get('scanned', 0)} txs — none flagged as outliers.")
+            parts.append(f"  Anomaly model scanned {ano.get('scanned', 0)} txs — none flagged.")
         else:
             parts.append(f"  Anomaly model flagged {n} of {ano.get('scanned', 0)} txs:")
             for a in ano["anomalies"]:
                 parts.append(
                     f"    - RM {a['amount']:.2f} on {a['createdAt']} (score={a['score']}, cat={a['category']})"
                 )
+
+    bocpd = signals.get("bocpd", {})
+    if bocpd.get("available"):
+        verdict = "CHANGEPOINT DETECTED" if bocpd["isChangepoint"] else "no changepoint"
+        parts.append(
+            f"  BOCPD: {verdict} (P={bocpd['changepointProb']:.2f}, "
+            f"current run length={bocpd['runLength']}, processed={bocpd['nProcessed']})."
+        )
+        if bocpd["isChangepoint"]:
+            parts.append(
+                "    NOTE: per your behaviour spec, only mention this if remaining_budget < "
+                "remaining_days × previous_daily_average × 0.7."
+            )
+
     return "\n".join(parts)
 
 

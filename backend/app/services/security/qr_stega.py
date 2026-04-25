@@ -116,32 +116,85 @@ def _render_matrix(matrix: list[list[bool]]) -> bytes:
     return buf.getvalue()
 
 
+def _embed_coords_for_n(n: int) -> list[tuple[int, int]]:
+    """Compute embed coordinates for any QR module size *n*."""
+    def is_finder(x: int, y: int) -> bool:
+        return (x <= 8 and y <= 8) or (x >= n - 9 and y <= 8) or (x <= 8 and y >= n - 9)
+
+    def is_timing(x: int, y: int) -> bool:
+        return x == 6 or y == 6
+
+    def is_format(x: int, y: int) -> bool:
+        return (y == 8 and (x <= 8 or x >= n - 8)) or (x == 8 and (y <= 8 or y >= n - 8))
+
+    # Alignment patterns for versions > 1 (simplified: skip the center 5×5 blocks)
+    # For exact positions we'd need the alignment table; conservatively skip a
+    # generous zone around the bottom-right area where they typically sit.
+    def is_align(x: int, y: int) -> bool:
+        if n <= 21:
+            return False  # version 1 has no alignment
+        # Version 2-6: single alignment at (n-9, n-9) ± 2
+        c = n - 9
+        return abs(x - c) <= 2 and abs(y - c) <= 2
+
+    coords: list[tuple[int, int]] = []
+    for y in range(n - 1, -1, -1):
+        for x in range(n - 1, -1, -1):
+            if is_finder(x, y) or is_timing(x, y) or is_align(x, y) or is_format(x, y):
+                continue
+            coords.append((x, y))
+            if len(coords) == HIDDEN_BITS:
+                return coords
+    raise RuntimeError("Not enough coords for hidden bits")
+
+
+def _render_matrix_dynamic(matrix: list[list[bool]], n: int) -> bytes:
+    """Render an n×n module matrix as a PNG."""
+    size = (n + BORDER * 2) * SCALE
+    img = Image.new("L", (size, size), 255)
+    px = img.load()
+    for y in range(n):
+        for x in range(n):
+            if matrix[y][x]:
+                for dy in range(SCALE):
+                    for dx in range(SCALE):
+                        px[(x + BORDER) * SCALE + dx, (y + BORDER) * SCALE + dy] = 0
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
 def generate_stega_qr(visible_payload: str, secret: bytes) -> tuple[bytes, int, int]:
     """Build a steganographic QR. Returns (png_bytes, ts, tag).
 
-    `secret` is the HMAC key. The same key must be passed to `verify_stega_qr`."""
+    `secret` is the HMAC key. The same key must be passed to `verify_stega_qr`.
+    Auto-selects QR version to fit the payload (minimum version 5)."""
     qr = qrcode.QRCode(
         version=VERSION,
         error_correction=ERROR_CORRECT_H,
         box_size=1,
-        border=0,  # we add our own border at render time
+        border=0,
     )
     qr.add_data(visible_payload)
-    qr.make(fit=False)
+    qr.make(fit=True)  # auto-upgrade version if data overflows
 
     src = qr.get_matrix()
-    if len(src) != N:
-        raise RuntimeError(f"Expected {N}x{N} matrix, got {len(src)}x{len(src[0])}")
+    actual_n = len(src)
     matrix = [list(row) for row in src]
 
     ts = int(time.time())
     tag = hmac32(secret, f"{visible_payload}|{ts}")
     hidden_bits = _int_to_bits_be(ts, 32) + _int_to_bits_be(tag, 32)
 
-    for (x, y), bit in zip(_COORDS, hidden_bits):
+    if actual_n == N:
+        coords = _COORDS
+    else:
+        coords = _embed_coords_for_n(actual_n)
+
+    for (x, y), bit in zip(coords, hidden_bits):
         matrix[y][x] = bool(bit)
 
-    return _render_matrix(matrix), ts, tag
+    return _render_matrix_dynamic(matrix, actual_n), ts, tag
 
 
 def _decode_visible(image_bytes: bytes) -> tuple[str, np.ndarray, int, int]:
@@ -158,13 +211,25 @@ def _decode_visible(image_bytes: bytes) -> tuple[str, np.ndarray, int, int]:
     return payload, arr, arr.shape[1], arr.shape[0]
 
 
-def _sample_hidden_bits(arr: np.ndarray, width: int, height: int) -> list[int]:
-    """Sample the hidden bits assuming the QR is rendered with our standard
-    SCALE/BORDER. Each module spans `width / (N + BORDER*2)` px; we sample
-    the centre pixel of each chosen module (dark = 1, light = 0)."""
-    module_px = width / (N + BORDER * 2)
+def _detect_module_count(width: int) -> int:
+    """Infer QR module count from the image width rendered with our SCALE/BORDER.
+
+    width = (n + 2*BORDER) * SCALE  →  n = width/SCALE - 2*BORDER
+    """
+    n = round(width / SCALE) - 2 * BORDER
+    # QR versions 1-40 have module counts 21, 25, 29, … (4k+17)
+    if n < 21 or (n - 21) % 4 != 0:
+        # Fall back to default
+        return N
+    return n
+
+
+def _sample_hidden_bits(arr: np.ndarray, width: int, height: int,
+                        coords: list[tuple[int, int]], n: int) -> list[int]:
+    """Sample the hidden bits from the image using the given coords and module count."""
+    module_px = width / (n + BORDER * 2)
     bits: list[int] = []
-    for x, y in _COORDS:
+    for x, y in coords:
         cx = int((x + BORDER + 0.5) * module_px)
         cy = int((y + BORDER + 0.5) * module_px)
         cy = min(max(cy, 0), height - 1)
@@ -187,7 +252,9 @@ def verify_stega_qr(
 
     Raises `StegaError` on any of: decode failure, HMAC mismatch, expired ts."""
     payload, arr, w, h = _decode_visible(image_bytes)
-    bits = _sample_hidden_bits(arr, w, h)
+    n = _detect_module_count(w)
+    coords = _COORDS if n == N else _embed_coords_for_n(n)
+    bits = _sample_hidden_bits(arr, w, h, coords, n)
     if len(bits) != HIDDEN_BITS:
         raise StegaError("Hidden bit count mismatch")
     ts = _bits_to_int(bits[:32])

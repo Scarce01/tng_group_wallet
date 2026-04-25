@@ -27,7 +27,7 @@
 ## Table of Contents
 
 - [💡 What Is This?](#-what-is-this)
-- [🔄 How It Works (In Plain English)](#-how-it-works-in-plain-english)
+- [🔄 How It Works
 - [🏗️ Architecture Overview](#️-architecture-overview)
 - [📂 Repository Structure](#-repository-structure)
 - [⚙️ Tech Stack](#️-tech-stack)
@@ -62,7 +62,7 @@ The whole thing was built in about 13 hours for a hackathon — ported from a No
 
 ---
 
-## 🔄 How It Works (In Plain English)
+## 🔄 How It Works
 
 1. 📱 **Sign up** with your Malaysian phone number and a 6-digit PIN.
 2. 🏊 **Create a pool** — pick "Trip" or "Family", name it, set a target amount, choose your voting rules (majority, unanimous, admin-only, etc.).
@@ -1086,19 +1086,6 @@ curl -s http://localhost:4000/api/v1/pools \
 
 ---
 
-## 👤 Demo Accounts
-
-All accounts use PIN `123456`:
-
-| Phone | Name | Role |
-|-------|------|------|
-| +60112345001 | Ahmad | Owner of both pools |
-| +60112345002 | Siti | Family pool admin |
-| +60112345003 | Raj | Trip pool member |
-| +60112345004 | Mei | Trip pool member |
-
----
-
 ## 📦 Deployment
 
 The backend is a stock FastAPI + Uvicorn app. It deploys identically to Render, Fly.io, Railway, or AWS App Runner / ECS Fargate.
@@ -1149,25 +1136,3 @@ These features are spec'd but not implemented in this hackathon cut:
 All of these can be layered on top without touching the core engine.
 
 ---
-
-## 📝 Notes for Contributors
-
-1. **Money is `Decimal`, never float.** The serializer always emits 2-dp strings (`"1234.50"`) so the frontend doesn't deal with rounding.
-
-2. **DateTimes go out as ISO-8601 with `Z` suffix and millisecond precision** — matches Prisma's wire format. See `backend/app/serialize.py`.
-
-3. **All ledger writes happen inside one DB transaction.** `make_contribution`, `cast_vote`, and `execute_approved_spend` are the canonical examples. Copy the pattern when adding new ledger flows.
-
-4. **`metadata` is a reserved column name in SQLAlchemy** (clashes with `Base.metadata`). The model attribute is `metadata_` and the serializer emits it as `metadata` to keep the API stable. Don't rename it.
-
-5. **The TypeScript backend in `src/` was the original implementation.** The project has since been ported to Python and that's what runs. The TS code is preserved for reference.
-
-6. **Agent replies are always in English** — enforced by `BASE_SYSTEM` in `agent/prompts.py`.
-
-7. **DeepSeek `<think>` blocks are stripped** before reaching the user or being persisted. They stay in DEBUG logs only.
-
-8. **BOCPD detector cache is in-process only** — it reconverges in ~10 observations after a restart. Memory tables (Postgres) survive restarts.
-
----
-
-*Built in ~13 hours for the TNG eWallet hackathon. ☕ Coffee was consumed. 😴 Sleep was not.*

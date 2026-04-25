@@ -524,6 +524,12 @@ async def ask(session: AsyncSession, *, pool_id: str, question: str) -> dict[str
     ml_signals = await gather_ml_signals(session, pool_id)
     ml_block = _format_ml_for_prompt(ml_signals)
 
+    # External context (weather + nearby places). For TRIP pools this is the
+    # answer to "how's the weather for our trip" — without it the agent
+    # truthfully says it has no access. Cache lives on PoolAgentMemory.
+    ext_ctx = await refresh_context_if_needed(session, pool_id)
+    ext_block = format_external_for_prompt(ext_ctx)
+
     # Recent transactions are needed so the agent can build a transaction_table
     # or a daily line_chart from real data instead of inventing values.
     recent_txs = await _recent_pool_transactions(session, pool_id, limit=40)
@@ -548,9 +554,14 @@ Recent transactions (newest first, max 40):
 
 Recent agent observations: {obs_str or '(none)'}
 
-{ml_block}
+{ml_block}{ext_block}
 
 User question: {question}
+
+If the user asks about weather and an EXTERNAL CONTEXT block above contains
+weather data, answer using that data. Do NOT say you have no access to
+weather. If no weather block is present, you may say weather data isn't
+available for this pool yet.
 
 Pick ONE widget that best illustrates the answer (or none if the question is
 purely conversational), then return the JSON object described in your system

@@ -287,6 +287,102 @@ export function usePoolAnalytics(poolId: string | undefined) {
   });
 }
 
+// ----------------- Pool Agent (AI) -----------------
+
+export interface AgentMessage {
+  id: string;
+  poolId: string;
+  type: string;
+  content: string;
+  metadata: unknown;
+  isRead: boolean;
+  createdAt: string;
+}
+
+export interface AgentAskResult {
+  answer: string;
+  messageId?: string;
+  reasoning?: string;
+}
+
+export function useAgentMessages(poolId: string | undefined, limit = 50) {
+  return useQuery({
+    queryKey: ["pool", poolId, "agent", "messages", limit],
+    queryFn: async () => {
+      const r = await api<{ items: AgentMessage[]; nextCursor: string | null }>(
+        `/pools/${poolId}/agent/messages?limit=${limit}`,
+      );
+      return r.items;
+    },
+    enabled: !!poolId && !!tokens.access,
+    staleTime: 5_000,
+  });
+}
+
+export function useAgentAsk(poolId: string | undefined) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { question: string }) =>
+      api<AgentAskResult>(`/pools/${poolId}/agent/ask`, { method: "POST", body }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["pool", poolId, "agent", "messages"] });
+    },
+  });
+}
+
+export function useAgentBrief(poolId: string | undefined) {
+  return useMutation({
+    mutationFn: () => api<{ brief: string }>(`/pools/${poolId}/agent/brief`, { method: "POST" }),
+  });
+}
+
+export function useAgentForecast(poolId: string | undefined) {
+  return useQuery({
+    queryKey: ["pool", poolId, "agent", "forecast"],
+    queryFn: () => api<unknown>(`/pools/${poolId}/agent/forecast`),
+    enabled: !!poolId && !!tokens.access,
+    staleTime: 60_000,
+  });
+}
+
+export function useAgentSuggestSplit(poolId: string | undefined) {
+  return useMutation({
+    mutationFn: () =>
+      api<unknown>(`/pools/${poolId}/agent/suggest-split`, { method: "POST" }),
+  });
+}
+
+export interface AgentContext {
+  weather: unknown;
+  locationTips: unknown;
+  currencyRates: unknown;
+  searchCache: unknown;
+  lastContextRefresh: string | null;
+}
+
+export function useAgentContext(poolId: string | undefined) {
+  return useQuery({
+    queryKey: ["pool", poolId, "agent", "context"],
+    queryFn: () => api<AgentContext | null>(`/pools/${poolId}/agent/context`),
+    enabled: !!poolId && !!tokens.access,
+    staleTime: 30_000,
+  });
+}
+
+export interface ScamCheckResult {
+  isScam: boolean;
+  confidence: number;
+  reason: string;
+  signals?: string[];
+}
+
+export function useScamCheck() {
+  return useMutation({
+    mutationFn: (body: { message: string; language?: "EN" | "MS" | "ZH" }) =>
+      api<ScamCheckResult>("/agent/check-scam", { method: "POST", body }),
+  });
+}
+
 // ----------------- Top up (demo helper) -----------------
 
 export function useTopup() {

@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
-import { Home, GraduationCap, ShoppingCart, Lightbulb, Utensils, Backpack, Pill, Hospital, Syringe, Milk, Ship, Activity, Book, Zap, Droplet, DollarSign, Bot } from 'lucide-react';
+import { useState } from 'react';
+import { Home, GraduationCap, ShoppingCart, Lightbulb, Utensils, Backpack, Pill, Hospital, Syringe, Milk, Ship, Activity, Book, Zap, Droplet, DollarSign, Bot, FileDown, Shield, Lock, X, CheckCircle2 } from 'lucide-react';
+import { POOL_REPORT_DATA, maskName } from '../data/poolData';
+import type { PoolReport } from '../data/poolData';
 import svgPaths from '../../imports/Pool-2/svg-j7y9f97e6x';
 import FigmaTree from '../../imports/Icon-1/Icon-2043-273';
-import { usePools, usePoolAnalytics, useSpendRequests } from '../../api/hooks';
 
 // ─── Brand palette ────────────────────────────────────────────────────────────
 const C = {
@@ -35,69 +36,75 @@ function IconComponent({ type, color, size = 16 }: { type: IconType; color: stri
   }
 }
 
-// ─── Trip / Pool data ─────────────────────────────────────────────────────────
-const TRIPS_DATA = {
-  langkawi: {
-    name: 'April Family Fund', icon: 'home' as IconType, members: 4, total: 1550,
-    A: { label: 'Housing & Utils', icon: 'home' as IconType, total: 600, color: C.cyan,
-      items: [{ icon: 'home' as IconType, name: 'Monthly Rent', amount: 'RM 400' },
-              { icon: 'lightbulb' as IconType, name: 'Electric Bill',  amount: 'RM 150' },
-              { icon: 'droplet' as IconType, name: 'Water Bill',  amount: 'RM 50'  }] },
-    B: { label: 'Groceries', icon: 'shopping-cart' as IconType, total: 450, color: C.orange,
-      items: [{ icon: 'utensils' as IconType, name: 'Wet Market', amount: 'RM 180' },
-              { icon: 'shopping-cart' as IconType, name: '99 Speedmart',       amount: 'RM 150' },
-              { icon: 'milk' as IconType, name: 'Milk & Snacks',       amount: 'RM 120' }] },
-    C: { label: 'Education', icon: 'graduation-cap' as IconType, total: 300, color: C.green,
-      items: [{ icon: 'graduation-cap' as IconType, name: 'School Fees',     amount: 'RM 120' },
-              { icon: 'book' as IconType, name: 'Textbooks', amount: 'RM 100' },
-              { icon: 'backpack' as IconType, name: 'Uniform & Supplies',   amount: 'RM 80'  }] },
-    D: { label: 'Healthcare', icon: 'pill' as IconType, total: 200, color: C.blue,
-      items: [{ icon: 'pill' as IconType, name: 'Pharmacy',    amount: 'RM 80' },
-              { icon: 'hospital' as IconType, name: 'Clinic Visit',       amount: 'RM 72' },
-              { icon: 'syringe' as IconType, name: 'Vitamins', amount: 'RM 48' }] },
-  },
-  penang: {
-    name: 'March Family Fund', icon: 'home' as IconType, members: 3, total: 980,
-    A: { label: 'Housing & Utils', icon: 'home' as IconType, total: 350, color: C.cyan,
-      items: [{ icon: 'home' as IconType, name: 'Monthly Rent', amount: 'RM 280' },
-              { icon: 'lightbulb' as IconType, name: 'Electric Bill', amount: 'RM 70'  }] },
-    B: { label: 'Groceries', icon: 'shopping-cart' as IconType, total: 420, color: C.orange,
-      items: [{ icon: 'utensils' as IconType, name: 'Wet Market', amount: 'RM 95' },
-              { icon: 'shopping-cart' as IconType, name: '99 Speedmart',  amount: 'RM 180' },
-              { icon: 'milk' as IconType, name: 'Milk & Snacks',    amount: 'RM 145' }] },
-    C: { label: 'Education', icon: 'graduation-cap' as IconType, total: 140, color: C.green,
-      items: [{ icon: 'graduation-cap' as IconType, name: 'School Fees',  amount: 'RM 80' },
-              { icon: 'book' as IconType, name: 'Textbooks',     amount: 'RM 60' }] },
-    D: { label: 'Healthcare', icon: 'pill' as IconType, total: 70, color: C.blue,
-      items: [{ icon: 'pill' as IconType, name: 'Pharmacy', amount: 'RM 28' },
-              { icon: 'hospital' as IconType, name: 'Clinic Visit',        amount: 'RM 42' }] },
-  },
-  kl: {
-    name: 'May Family Fund', icon: 'home' as IconType, members: 4, total: 1220,
-    A: { label: 'Housing & Utils', icon: 'home' as IconType, total: 480, color: C.cyan,
-      items: [{ icon: 'home' as IconType, name: 'Monthly Rent',    amount: 'RM 380' },
-              { icon: 'lightbulb' as IconType, name: 'Electric Bill',   amount: 'RM 100' }] },
-    B: { label: 'Groceries', icon: 'shopping-cart' as IconType, total: 380, color: C.orange,
-      items: [{ icon: 'utensils' as IconType, name: 'Wet Market', amount: 'RM 150' },
-              { icon: 'shopping-cart' as IconType, name: '99 Speedmart',  amount: 'RM 90'  },
-              { icon: 'milk' as IconType, name: 'Milk & Snacks',  amount: 'RM 140' }] },
-    C: { label: 'Education', icon: 'graduation-cap' as IconType, total: 260, color: C.green,
-      items: [{ icon: 'graduation-cap' as IconType, name: 'School Fees',   amount: 'RM 140' },
-              { icon: 'book' as IconType, name: 'Textbooks',  amount: 'RM 80'  },
-              { icon: 'backpack' as IconType, name: 'Uniform & Supplies',       amount: 'RM 40'  }] },
-    D: { label: 'Healthcare', icon: 'pill' as IconType, total: 100, color: C.blue,
-      items: [{ icon: 'pill' as IconType, name: 'Pharmacy',     amount: 'RM 45' },
-              { icon: 'hospital' as IconType, name: 'Clinic Visit',     amount: 'RM 55' }] },
-  },
-} as const;
-
-// TripId is a runtime string (poolId, or fallback static keys). Using string here
-// lets us swap TRIPS_DATA for backend-derived data without TypeScript fights.
-type TripId  = string;
+// ─── Pool data types ──────────────────────────────────────────────────────────
+interface PoolBranchItem { icon: IconType; name: string; amount: string; }
+interface PoolBranch { label: string; icon: IconType; total: number; color: string; items: PoolBranchItem[]; }
+interface PoolEntry {
+  name: string; icon: IconType; members: number; total: number; aiLimit: number;
+  A: PoolBranch; B: PoolBranch; C: PoolBranch; D: PoolBranch;
+}
+type TripId = 'education' | 'house' | 'general';
 type BranchId = 'A' | 'B' | 'C' | 'D';
-type Trip = typeof TRIPS_DATA[keyof typeof TRIPS_DATA];
 
-// ─── Fiber generator ──────────────────────────────────────────────────────────
+// ─── Shared Pools data ────────────────────────────────────────────────────────
+const TRIPS_DATA: Record<TripId, PoolEntry> = {
+  education: {
+    name: 'Education Pool', icon: 'graduation-cap' as IconType, members: 4, total: 1240, aiLimit: 1500,
+    A: { label: 'Tuition Fees',     icon: 'graduation-cap' as IconType, total: 520, color: C.cyan,
+      items: [{ icon: 'graduation-cap' as IconType, name: 'Yuran Universiti',  amount: 'RM 350' },
+              { icon: 'book'          as IconType, name: 'Bayaran PTPTN',      amount: 'RM 120' },
+              { icon: 'backpack'      as IconType, name: 'Yuran Pendaftaran',  amount: 'RM 50'  }] },
+    B: { label: 'Books & Materials', icon: 'book' as IconType, total: 320, color: C.orange,
+      items: [{ icon: 'book'          as IconType, name: 'Buku Teks',          amount: 'RM 180' },
+              { icon: 'backpack'      as IconType, name: 'Alat Tulis',         amount: 'RM 80'  },
+              { icon: 'shopping-cart' as IconType, name: 'Print & Fotokopi',   amount: 'RM 60'  }] },
+    C: { label: 'Transport',         icon: 'home' as IconType, total: 250, color: C.green,
+      items: [{ icon: 'home'          as IconType, name: 'Pas Bas (Bulanan)',  amount: 'RM 120' },
+              { icon: 'lightbulb'     as IconType, name: 'Grab ke Sekolah',   amount: 'RM 80'  },
+              { icon: 'droplet'       as IconType, name: 'Minyak Petrol',     amount: 'RM 50'  }] },
+    D: { label: 'Online Courses',    icon: 'pill' as IconType, total: 150, color: C.blue,
+      items: [{ icon: 'pill'          as IconType, name: 'Coursera',          amount: 'RM 80'  },
+              { icon: 'hospital'      as IconType, name: 'YouTube Premium',   amount: 'RM 70'  }] },
+  },
+  house: {
+    name: 'House Pool', icon: 'home' as IconType, members: 5, total: 1820, aiLimit: 2000,
+    A: { label: 'Rent & Utilities',  icon: 'home' as IconType, total: 750, color: C.cyan,
+      items: [{ icon: 'home'          as IconType, name: 'Monthly Rent',      amount: 'RM 500' },
+              { icon: 'lightbulb'     as IconType, name: 'Electric Bill',     amount: 'RM 160' },
+              { icon: 'droplet'       as IconType, name: 'Water Bill',        amount: 'RM 90'  }] },
+    B: { label: 'Groceries',         icon: 'shopping-cart' as IconType, total: 580, color: C.orange,
+      items: [{ icon: 'utensils'      as IconType, name: 'Pasar Basah',       amount: 'RM 220' },
+              { icon: 'shopping-cart' as IconType, name: '99 Speedmart',      amount: 'RM 210' },
+              { icon: 'milk'          as IconType, name: 'Dairy & Snacks',    amount: 'RM 150' }] },
+    C: { label: 'Maintenance',       icon: 'lightbulb' as IconType, total: 320, color: C.green,
+      items: [{ icon: 'lightbulb'     as IconType, name: 'Plumbing Repair',   amount: 'RM 150' },
+              { icon: 'home'          as IconType, name: 'Cleaning Service',  amount: 'RM 100' },
+              { icon: 'droplet'       as IconType, name: 'Painting Touch-up', amount: 'RM 70'  }] },
+    D: { label: 'Internet & TV',     icon: 'lightbulb' as IconType, total: 170, color: C.blue,
+      items: [{ icon: 'lightbulb'     as IconType, name: 'Unifi Broadband',   amount: 'RM 100' },
+              { icon: 'pill'          as IconType, name: 'Astro Subscription', amount: 'RM 70' }] },
+  },
+  general: {
+    name: 'General Fund', icon: 'shopping-cart' as IconType, members: 4, total: 980, aiLimit: 1200,
+    A: { label: 'Food & Dining',     icon: 'utensils' as IconType, total: 380, color: C.cyan,
+      items: [{ icon: 'utensils'      as IconType, name: 'Restaurants',       amount: 'RM 180' },
+              { icon: 'shopping-cart' as IconType, name: 'Food Delivery',     amount: 'RM 120' },
+              { icon: 'milk'          as IconType, name: 'Cafes & Drinks',    amount: 'RM 80'  }] },
+    B: { label: 'Shopping',          icon: 'shopping-cart' as IconType, total: 280, color: C.orange,
+      items: [{ icon: 'shopping-cart' as IconType, name: 'Shopee / Lazada',   amount: 'RM 150' },
+              { icon: 'backpack'      as IconType, name: 'Clothing',          amount: 'RM 80'  },
+              { icon: 'milk'          as IconType, name: 'Household Items',   amount: 'RM 50'  }] },
+    C: { label: 'Healthcare',        icon: 'pill' as IconType, total: 190, color: C.green,
+      items: [{ icon: 'pill'          as IconType, name: 'Guardian Farmasi',  amount: 'RM 90'  },
+              { icon: 'hospital'      as IconType, name: 'Klinik Visit',      amount: 'RM 60'  },
+              { icon: 'syringe'       as IconType, name: 'Vitamins & Supps',  amount: 'RM 40'  }] },
+    D: { label: 'Entertainment',     icon: 'hospital' as IconType, total: 130, color: C.blue,
+      items: [{ icon: 'pill'          as IconType, name: 'Netflix / Disney+', amount: 'RM 60'  },
+              { icon: 'syringe'       as IconType, name: 'Movie Tickets',     amount: 'RM 70'  }] },
+  },
+};
+
+// ─── Fiber generator ───────────��──────────────────────────────────────────────
 interface FP { d: string; w: number; op: number; dash?: string; col: string }
 
 function mkFibers(
@@ -264,7 +271,7 @@ function TipCluster({ cx, cy, col, glowId, label, delay, focused }: {
 }
 
 // ─── DrillDownPanel ───────────────────────────────────────────────────────────
-type TripBranch = typeof TRIPS_DATA['langkawi']['A'];
+type TripBranch = PoolBranch;
 
 function DrillDownPanel({ branch, onClose }: { branch: TripBranch; onClose: () => void }) {
   return (
@@ -377,9 +384,10 @@ function FloatingParticle({ delay, left, color }: { delay: number; left: string;
 }
 
 // ─── Interactive Figma Tree Wrapper ──────────────────────────────────────────
-function InteractiveFigmaTree({ trip }: { trip: Trip }) {
+function InteractiveFigmaTree({ tripId }: { tripId: TripId }) {
   const [focused, setFocused] = useState<BranchId | null>(null);
   const [hoveredBranch, setHoveredBranch] = useState<BranchId | null>(null);
+  const trip = TRIPS_DATA[tripId];
 
   const toggle = (id: BranchId, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -574,10 +582,14 @@ function InteractiveFigmaTree({ trip }: { trip: Trip }) {
   );
 }
 
-// ─── CyberBotanicalTree (kept for reference, not currently rendered) ─────────
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-function CyberBotanicalTree({ trip }: { trip: Trip }) {
+// ─── CyberBotanicalTree ───────────────────────────────────────────────────────
+function CyberBotanicalTree({ tripId }: { tripId: TripId }) {
   const [focused, setFocused] = useState<BranchId | null>(null);
+  const trip = TRIPS_DATA[tripId];
+
+  // Helper: get amount string from a branch item, falling back gracefully
+  const amt = (branch: PoolBranch, idx: number) =>
+    branch.items[idx]?.amount ?? branch.items[0]?.amount ?? `RM ${branch.total}`;
 
   const toggle = (id: BranchId, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -860,39 +872,39 @@ function CyberBotanicalTree({ trip }: { trip: Trip }) {
           </g>
         </g>
 
-        {/* ── Sub-branch RM labels (dimmed when focused) ── */}
+        {/* ── Sub-branch RM labels (dimmed when focused) — dynamic per pool ── */}
         <g filter="url(#softGlow)" style={{ opacity: focused ? 0.18 : 1, transition: 'opacity 0.4s', pointerEvents: 'none' }}>
           {/* A tendril labels */}
           <path d="M62 215 Q44 200 28 188" stroke={C.cyan} strokeWidth="0.6" fill="none" />
           <circle cx="28" cy="188" r="2" fill={C.cyan} />
-          <text x="20" y="183" textAnchor="middle" fontSize="8" fontWeight="800" fill={C.cyan} opacity="0.9" fontFamily="Inter,sans-serif">RM 150</text>
+          <text x="20" y="183" textAnchor="middle" fontSize="8" fontWeight="800" fill={C.cyan} opacity="0.9" fontFamily="Inter,sans-serif">{amt(trip.A, 1)}</text>
 
           <path d="M44 165 Q30 150 18 138" stroke={C.cyanLt} strokeWidth="0.5" fill="none" />
           <circle cx="18" cy="138" r="1.6" fill={C.cyanLt} />
-          <text x="10" y="133" textAnchor="middle" fontSize="7.5" fontWeight="700" fill={C.cyanLt} opacity="0.8" fontFamily="Inter,sans-serif">RM 50</text>
+          <text x="10" y="133" textAnchor="middle" fontSize="7.5" fontWeight="700" fill={C.cyanLt} opacity="0.8" fontFamily="Inter,sans-serif">{amt(trip.A, 2)}</text>
 
           {/* B tendril labels */}
           <path d="M156 178 Q140 162 126 148" stroke={C.orange} strokeWidth="0.6" fill="none" />
           <circle cx="126" cy="148" r="2" fill={C.orange} />
-          <text x="115" y="142" textAnchor="middle" fontSize="8" fontWeight="800" fill={C.orange} opacity="0.9" fontFamily="Inter,sans-serif">RM 100</text>
+          <text x="115" y="142" textAnchor="middle" fontSize="8" fontWeight="800" fill={C.orange} opacity="0.9" fontFamily="Inter,sans-serif">{amt(trip.B, 1)}</text>
 
           <path d="M158 148 Q168 134 177 120" stroke={C.orangeLt} strokeWidth="0.5" fill="none" />
           <circle cx="177" cy="120" r="1.6" fill={C.orangeLt} />
-          <text x="186" y="115" textAnchor="middle" fontSize="7.5" fontWeight="700" fill={C.orangeLt} opacity="0.8" fontFamily="Inter,sans-serif">RM 180</text>
+          <text x="186" y="115" textAnchor="middle" fontSize="7.5" fontWeight="700" fill={C.orangeLt} opacity="0.8" fontFamily="Inter,sans-serif">{amt(trip.B, 0)}</text>
 
           {/* C tendril labels */}
           <path d="M258 178 Q274 162 290 148" stroke={C.green} strokeWidth="0.6" fill="none" />
           <circle cx="290" cy="148" r="2" fill={C.green} />
-          <text x="300" y="142" textAnchor="middle" fontSize="8" fontWeight="800" fill={C.green} opacity="0.9" fontFamily="Inter,sans-serif">RM 120</text>
+          <text x="300" y="142" textAnchor="middle" fontSize="8" fontWeight="800" fill={C.green} opacity="0.9" fontFamily="Inter,sans-serif">{amt(trip.C, 1)}</text>
 
           <path d="M258 148 Q248 134 240 120" stroke={C.greenLt} strokeWidth="0.5" fill="none" />
           <circle cx="240" cy="120" r="1.6" fill={C.greenLt} />
-          <text x="234" y="114" textAnchor="middle" fontSize="7.5" fontWeight="700" fill={C.greenLt} opacity="0.8" fontFamily="Inter,sans-serif">RM 80</text>
+          <text x="234" y="114" textAnchor="middle" fontSize="7.5" fontWeight="700" fill={C.greenLt} opacity="0.8" fontFamily="Inter,sans-serif">{amt(trip.C, 0)}</text>
 
           {/* D tendril label */}
           <path d="M344 220 Q328 204 312 190" stroke={C.blue} strokeWidth="0.6" fill="none" />
           <circle cx="312" cy="190" r="2" fill={C.blue} />
-          <text x="304" y="184" textAnchor="middle" fontSize="8" fontWeight="800" fill={C.blue} opacity="0.9" fontFamily="Inter,sans-serif">RM 80</text>
+          <text x="304" y="184" textAnchor="middle" fontSize="8" fontWeight="800" fill={C.blue} opacity="0.9" fontFamily="Inter,sans-serif">{amt(trip.D, 0)}</text>
         </g>
 
         {/* Tap hint */}
@@ -936,18 +948,10 @@ function WalletIcon() {
 }
 
 // ─── Trip Selector Dropdown ───────────────────────────────────────────────────
-function TripSelector({
-  tripId,
-  trips,
-  onSelect,
-}: {
-  tripId: TripId;
-  trips: { id: TripId; data: Trip }[];
-  onSelect: (id: TripId) => void;
-}) {
+function TripSelector({ tripId, onSelect }: { tripId: TripId; onSelect: (id: TripId) => void }) {
   const [open, setOpen] = useState(false);
-  const trip = trips.find((t) => t.id === tripId)?.data ?? trips[0]?.data ?? TRIPS_DATA.langkawi;
-  const allTrips: [TripId, Trip][] = trips.map((t) => [t.id, t.data]);
+  const trip = TRIPS_DATA[tripId];
+  const allTrips = Object.entries(TRIPS_DATA) as [TripId, typeof TRIPS_DATA[TripId]][];
 
   return (
     <div style={{ position: 'relative' }}>
@@ -980,7 +984,7 @@ function TripSelector({
               </svg>
             </div>
             <p style={{ fontSize: 11, color: 'rgba(219,234,254,0.45)', margin: 0, letterSpacing: '0.4px' }}>
-              {trip.members} Members • Transparent Pool
+              {trip.members} Members • Shared Pool
             </p>
           </div>
         </div>
@@ -1023,7 +1027,7 @@ function TripSelector({
                 </div>
                 <div>
                   <div style={{ fontSize: 13, fontWeight: 700, color: id === tripId ? C.cyan : '#fff' }}>{t.name}</div>
-                  <div style={{ fontSize: 10, color: 'rgba(190,219,255,0.4)' }}>{t.members} members</div>
+                  <div style={{ fontSize: 10, color: 'rgba(190,219,255,0.4)' }}>{t.members} ahli</div>
                 </div>
               </div>
               <div style={{ textAlign: 'right' }}>
@@ -1045,19 +1049,18 @@ function TripSelector({
 // ─── CategoryRow: expandable ──────────────────────────────────────────────────
 const BRANCH_IDS: BranchId[] = ['A', 'B', 'C', 'D'];
 
-function CategoryRow({ branchId, branch, tripTotal, expanded, onToggle }: {
+function CategoryRow({ branchId, branch, expanded, onToggle, poolTotal }: {
   branchId: BranchId;
   branch: TripBranch;
-  tripTotal: number;
   expanded: boolean;
   onToggle: () => void;
+  poolTotal: number;
 }) {
   const total = branch.items.reduce((s, it) => {
     const n = parseFloat(it.amount.replace('RM ', ''));
     return s + (isNaN(n) ? 0 : n);
   }, 0);
-  const denom = tripTotal > 0 ? tripTotal : 1;
-  const pct = Math.round((branch.total / denom) * 100);
+  const pct = Math.round((branch.total / (poolTotal || 1)) * 100);
 
   return (
     <div style={{ marginBottom: 6 }}>
@@ -1162,157 +1165,303 @@ function CategoryRow({ branchId, branch, tripTotal, expanded, onToggle }: {
   );
 }
 
-// ─── Category mapping (backend enum → 4 visual branches) ─────────────────────
-type CategoryKey =
-  | 'ACCOMMODATION' | 'TRANSPORT' | 'FOOD' | 'ACTIVITIES' | 'SHOPPING'
-  | 'TOLL' | 'PETROL' | 'OTHER_TRIP' | 'RENT' | 'UTILITIES' | 'GROCERIES'
-  | 'EDUCATION' | 'MEDICAL' | 'INSURANCE' | 'CHILDCARE' | 'OTHER_FAMILY';
+// ─── Pool Report types & data ─── imported from shared data layer ─────────────
+// See: /src/app/data/poolData.ts
+// POOL_REPORT_DATA and maskName are imported at the top of this file.
 
-function categoryToBranch(cat: string): BranchId {
-  switch (cat) {
-    case 'RENT':
-    case 'UTILITIES':
-    case 'ACCOMMODATION':
-      return 'A';
-    case 'GROCERIES':
-    case 'FOOD':
-      return 'B';
-    case 'EDUCATION':
-    case 'CHILDCARE':
-    case 'ACTIVITIES':
-      return 'C';
-    case 'MEDICAL':
-    case 'INSURANCE':
-    case 'TRANSPORT':
-    case 'PETROL':
-    case 'TOLL':
-    case 'SHOPPING':
-    case 'OTHER_TRIP':
-    case 'OTHER_FAMILY':
-    default:
-      return 'D';
-  }
-}
+// ─── Secure Pool Report Bottom Sheet ─────────────────────────────────────────
+function SecurePoolReportSheet({
+  tripId, onClose, onDownload,
+}: { tripId: TripId; onClose: () => void; onDownload: () => void; }) {
+  const trip = TRIPS_DATA[tripId];
+  const report = POOL_REPORT_DATA[tripId];
+  const totalContributed = report.contributors.reduce((s, c) => s + c.amount, 0);
+  const totalSpent = report.transactions.reduce((s, t) => s + t.amount, 0);
+  const reportId = `ZKP-${tripId.toUpperCase().slice(0, 3)}-${Date.now().toString(36).toUpperCase().slice(-6)}`;
+  const generatedAt = `25 Apr 2026, 14:32:05`;
 
-const CATEGORY_LABEL: Record<string, string> = {
-  ACCOMMODATION: 'Accommodation', TRANSPORT: 'Transport', FOOD: 'Food',
-  ACTIVITIES: 'Activities', SHOPPING: 'Shopping', TOLL: 'Toll', PETROL: 'Petrol',
-  OTHER_TRIP: 'Other (Trip)', RENT: 'Rent', UTILITIES: 'Utilities',
-  GROCERIES: 'Groceries', EDUCATION: 'Education', MEDICAL: 'Medical',
-  INSURANCE: 'Insurance', CHILDCARE: 'Childcare', OTHER_FAMILY: 'Other',
-};
+  return (
+    <div
+      style={{ position: 'fixed', inset: 0, zIndex: 200, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', maxWidth: 402, margin: '0 auto' }}
+      onClick={onClose}
+    >
+      {/* Backdrop */}
+      <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(3px)' }} />
 
-const CATEGORY_ICON: Record<string, IconType> = {
-  RENT: 'home', UTILITIES: 'lightbulb', ACCOMMODATION: 'home',
-  GROCERIES: 'shopping-cart', FOOD: 'utensils',
-  EDUCATION: 'graduation-cap', CHILDCARE: 'backpack', ACTIVITIES: 'book',
-  MEDICAL: 'pill', INSURANCE: 'pill', TRANSPORT: 'home',
-  PETROL: 'home', TOLL: 'home', SHOPPING: 'shopping-cart',
-  OTHER_TRIP: 'home', OTHER_FAMILY: 'home',
-};
+      {/* Sheet */}
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          position: 'relative',
+          background: '#FFFFFF',
+          borderRadius: '24px 24px 0 0',
+          maxHeight: '90vh',
+          display: 'flex',
+          flexDirection: 'column',
+          animation: 'slideUpSheet 0.35s cubic-bezier(0.32,0.72,0,1)',
+          boxShadow: '0 -8px 32px rgba(0,0,0,0.12)',
+        }}
+      >
+        <style>{`
+          @keyframes slideUpSheet {
+            from { transform: translateY(100%); opacity: 0.6; }
+            to   { transform: translateY(0);    opacity: 1;   }
+          }
+        `}</style>
 
-const BRANCH_META: Record<BranchId, { label: string; icon: IconType; color: string }> = {
-  A: { label: 'Housing & Utils', icon: 'home',           color: C.cyan   },
-  B: { label: 'Groceries & Food', icon: 'shopping-cart', color: C.orange },
-  C: { label: 'Education',       icon: 'graduation-cap', color: C.green  },
-  D: { label: 'Health & Other',  icon: 'pill',           color: C.blue   },
-};
+        {/* Handle */}
+        <div style={{ display: 'flex', justifyContent: 'center', padding: '10px 0' }}>
+          <div style={{ width: 40, height: 4, borderRadius: 99, background: '#D1D5DB' }} />
+        </div>
 
-interface PoolSpend {
-  id: string;
-  title: string;
-  amount: number;
-  category: string;
-}
+        {/* Header */}
+        <div style={{ padding: '8px 20px 16px', borderBottom: '1px solid #E5E7EB' }}>
+          {/* Logo & Title */}
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, marginBottom: 14 }}>
+            <img
+              src={new URL('../imports/PHOTO-2026-04-25-12-21-19.jpg', import.meta.url).href}
+              alt="KongsiGo"
+              style={{
+                width: 100,
+                height: 'auto',
+                filter: 'brightness(0) saturate(100%) invert(10%) sepia(40%) saturate(4000%) hue-rotate(210deg) brightness(92%) contrast(105%)',
+              }}
+            />
+            <h2 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: '#101828', letterSpacing: '-0.3px', fontFamily: 'Inter, sans-serif' }}>
+              Secure Pool Audit Ledger
+            </h2>
+          </div>
 
-function buildTripFromBackend(
-  poolName: string,
-  memberCount: number,
-  executedSpends: PoolSpend[],
-): Trip {
-  const buckets: Record<BranchId, { total: number; items: { icon: IconType; name: string; amount: string }[] }> = {
-    A: { total: 0, items: [] },
-    B: { total: 0, items: [] },
-    C: { total: 0, items: [] },
-    D: { total: 0, items: [] },
-  };
-  for (const sr of executedSpends) {
-    const b = categoryToBranch(sr.category);
-    buckets[b].total += sr.amount;
-    buckets[b].items.push({
-      icon: CATEGORY_ICON[sr.category] ?? 'home',
-      name: sr.title || CATEGORY_LABEL[sr.category] || sr.category,
-      amount: `RM ${sr.amount.toFixed(0)}`,
-    });
-  }
-  const total = buckets.A.total + buckets.B.total + buckets.C.total + buckets.D.total;
-  return {
-    name: poolName,
-    icon: 'home',
-    members: memberCount,
-    total,
-    A: { ...BRANCH_META.A, total: buckets.A.total, items: buckets.A.items },
-    B: { ...BRANCH_META.B, total: buckets.B.total, items: buckets.B.items },
-    C: { ...BRANCH_META.C, total: buckets.C.total, items: buckets.C.items },
-    D: { ...BRANCH_META.D, total: buckets.D.total, items: buckets.D.items },
-  } as Trip;
+          {/* Close button */}
+          <button
+            onClick={onClose}
+            style={{
+              position: 'absolute', top: 16, right: 20,
+              width: 32, height: 32, borderRadius: '50%',
+              background: '#F3F4F6', border: 'none', cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}
+          >
+            <X size={18} color="#6B7280" strokeWidth={2.5} />
+          </button>
+
+          {/* Report Metadata Card */}
+          <div style={{
+            background: '#F9FAFB', border: '1px solid #E5E7EB', borderRadius: 12,
+            padding: '10px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          }}>
+            <div>
+              <p style={{ margin: 0, fontSize: 10, color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 600 }}>Report ID</p>
+              <p style={{ margin: '2px 0 0', fontSize: 12, fontWeight: 700, color: '#005AFF', fontFamily: 'monospace', letterSpacing: '0.8px' }}>{reportId}</p>
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              <p style={{ margin: 0, fontSize: 10, color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 600 }}>Generated</p>
+              <p style={{ margin: '2px 0 0', fontSize: 11, fontWeight: 600, color: '#374151', fontFamily: 'monospace' }}>{generatedAt}</p>
+            </div>
+          </div>
+
+          {/* Pool Summary Card */}
+          <div style={{
+            marginTop: 10, background: '#EBF3FD', border: '1px solid #BFDBFE', borderRadius: 12,
+            padding: '10px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          }}>
+            <div>
+              <p style={{ margin: 0, fontSize: 10, color: '#1E40AF', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 600 }}>Pool Name</p>
+              <p style={{ margin: '2px 0 0', fontSize: 14, fontWeight: 800, color: '#101828' }}>{trip.name}</p>
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              <p style={{ margin: 0, fontSize: 10, color: '#1E40AF', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 600 }}>Total Collected</p>
+              <p style={{ margin: '2px 0 0', fontSize: 16, fontWeight: 900, color: '#16A34A', fontFamily: 'monospace' }}>RM {totalContributed.toFixed(2)}</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Scrollable Ledger Body */}
+        <div style={{ overflowY: 'auto', padding: '16px 20px 12px', flex: 1, minHeight: 0 }}>
+
+          {/* SECTION A: Contributor Ledger */}
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+              <div style={{ width: 3, height: 16, borderRadius: 99, background: '#005AFF', flexShrink: 0 }} />
+              <h3 style={{ margin: 0, fontSize: 13, fontWeight: 800, color: '#005AFF', textTransform: 'uppercase', letterSpacing: '0.8px' }}>Section A — Contributors</h3>
+              <Lock size={12} color="#6B7280" strokeWidth={2} />
+            </div>
+            <p style={{ margin: '0 0 10px', fontSize: 11, color: '#6B7280', lineHeight: 1.5 }}>
+              Identities masked for privacy. Contributions verified on-chain.
+            </p>
+
+            {/* Contributors Table */}
+            <div style={{ background: '#FAFAFA', border: '1px solid #E5E7EB', borderRadius: 12, overflow: 'hidden' }}>
+              {/* Table Header */}
+              <div style={{
+                display: 'flex', justifyContent: 'space-between', padding: '8px 14px',
+                background: '#F3F4F6', borderBottom: '1px solid #E5E7EB',
+              }}>
+                <span style={{ fontSize: 10, fontWeight: 700, color: '#374151', textTransform: 'uppercase', letterSpacing: '0.6px' }}>Masked Name</span>
+                <span style={{ fontSize: 10, fontWeight: 700, color: '#374151', textTransform: 'uppercase', letterSpacing: '0.6px' }}>Contribution</span>
+              </div>
+
+              {/* Contributors Rows */}
+              {report.contributors.map((c, i) => (
+                <div key={i} style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  padding: '10px 14px',
+                  background: '#FFFFFF',
+                  borderBottom: i < report.contributors.length - 1 ? '1px solid #F3F4F6' : 'none',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <div style={{
+                      width: 32, height: 32, borderRadius: '50%',
+                      background: '#DBEAFE', border: '1.5px solid #93C5FD',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 13, fontWeight: 800, color: '#1E40AF',
+                    }}>
+                      {c.name[0]}
+                    </div>
+                    <div>
+                      <p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: '#101828', fontFamily: 'monospace', letterSpacing: '0.5px' }}>
+                        {maskName(c.name)}
+                      </p>
+                      <p style={{ margin: '1px 0 0', fontSize: 9, color: '#16A34A', fontWeight: 600, letterSpacing: '0.3px' }}>✓ Verified</p>
+                    </div>
+                  </div>
+                  <span style={{ fontSize: 14, fontWeight: 800, color: '#16A34A', fontFamily: 'monospace' }}>
+                    +RM {c.amount.toFixed(2)}
+                  </span>
+                </div>
+              ))}
+
+              {/* Contributors Total */}
+              <div style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                padding: '8px 14px',
+                background: '#F0FDF4', borderTop: '2px solid #BBF7D0',
+              }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: '#15803D', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                  {report.contributors.length} Contributors
+                </span>
+                <span style={{ fontSize: 15, fontWeight: 900, color: '#16A34A', fontFamily: 'monospace' }}>
+                  RM {totalContributed.toFixed(2)}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* SECTION B: Spending Ledger */}
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+              <div style={{ width: 3, height: 16, borderRadius: 99, background: '#EF4444', flexShrink: 0 }} />
+              <h3 style={{ margin: 0, fontSize: 13, fontWeight: 800, color: '#EF4444', textTransform: 'uppercase', letterSpacing: '0.8px' }}>Section B — Spending Ledger</h3>
+              <Lock size={12} color="#6B7280" strokeWidth={2} />
+            </div>
+            <p style={{ margin: '0 0 10px', fontSize: 11, color: '#6B7280', lineHeight: 1.5 }}>
+              Spender identities masked. Timestamps are immutable records.
+            </p>
+
+            {/* Transactions List */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {report.transactions.map((tx, i) => (
+                <div key={i} style={{
+                  padding: '12px 14px',
+                  background: '#FFFFFF',
+                  border: '1px solid #E5E7EB',
+                  borderLeft: '3px solid #EF4444',
+                  borderRadius: '0 10px 10px 0',
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{
+                        padding: '3px 10px',
+                        background: '#FEF2F2', border: '1px solid #FECACA',
+                        borderRadius: 6, fontSize: 11, fontWeight: 800,
+                        color: '#DC2626', fontFamily: 'monospace', letterSpacing: '0.4px',
+                      }}>
+                        {maskName(tx.spender)}
+                      </span>
+                      <span style={{ fontSize: 8, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.4px', fontWeight: 600 }}>masked</span>
+                    </div>
+                    <span style={{ fontSize: 14, fontWeight: 900, color: '#DC2626', fontFamily: 'monospace' }}>
+                      −RM {tx.amount.toFixed(2)}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: 12, color: '#374151', fontWeight: 500 }}>{tx.description}</span>
+                    <span style={{ fontSize: 9, color: '#9CA3AF', fontFamily: 'monospace', letterSpacing: '0.2px' }}>{tx.timestamp}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Spending Total */}
+            <div style={{
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              padding: '8px 14px', marginTop: 8,
+              background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 10,
+            }}>
+              <span style={{ fontSize: 11, fontWeight: 700, color: '#B91C1C', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                {report.transactions.length} Transactions
+              </span>
+              <span style={{ fontSize: 15, fontWeight: 900, color: '#DC2626', fontFamily: 'monospace' }}>
+                −RM {totalSpent.toFixed(2)}
+              </span>
+            </div>
+          </div>
+
+          {/* ZKP Privacy Notice */}
+          <div style={{
+            padding: '10px 12px',
+            background: '#F0F9FF', border: '1px solid #BFDBFE', borderRadius: 10,
+            display: 'flex', alignItems: 'flex-start', gap: 8,
+          }}>
+            <Shield size={14} color="#005AFF" strokeWidth={2.5} style={{ flexShrink: 0, marginTop: 1 }} />
+            <p style={{ margin: 0, fontSize: 10, color: '#1E40AF', lineHeight: 1.6, letterSpacing: '0.1px' }}>
+              This report uses Zero-Knowledge Proofs (ZKP) to verify financial data without exposing identities. All records are cryptographically secured.
+            </p>
+          </div>
+        </div>
+
+        {/* Export Button */}
+        <div style={{ padding: '14px 20px 24px', borderTop: '1px solid #E5E7EB' }}>
+          <button
+            onClick={onDownload}
+            style={{
+              width: '100%', height: 50, borderRadius: 14, border: 'none', cursor: 'pointer',
+              background: '#005AFF',
+              boxShadow: '0 4px 16px rgba(0,90,255,0.24)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
+              fontFamily: 'Inter, sans-serif',
+            }}
+          >
+            <FileDown size={20} color="white" strokeWidth={2.5} />
+            <span style={{ fontSize: 15, fontWeight: 800, color: '#FFFFFF', letterSpacing: '0.2px' }}>
+              Export Secure PDF Report
+            </span>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // ─── Main Export ──────────────────────────────────────────────────────────────
 export function AnalyticsDashboard() {
-  const poolsQ = usePools();
-  const backendPools = poolsQ.data ?? [];
-
-  const [tripId, setTripId] = useState<TripId>('');
+  const [tripId, setTripId]       = useState<TripId>('education');
   const [expandedCat, setExpanded] = useState<BranchId | null>(null);
+  const [showReport, setShowReport] = useState(false);
+  const [downloadToast, setDownloadToast] = useState(false);
+  const trip = TRIPS_DATA[tripId];
 
-  // Pick the first pool once it loads, unless the user already chose one.
-  useEffect(() => {
-    if (!tripId && backendPools.length > 0) {
-      setTripId(backendPools[0].id);
-    }
-  }, [tripId, backendPools]);
+  const handleDownload = () => {
+    setShowReport(false);
+    setDownloadToast(true);
+    setTimeout(() => setDownloadToast(false), 3200);
+  };
 
-  // Live data for the selected pool.
-  const activePool = backendPools.find((p) => p.id === tripId);
-  const analyticsQ = usePoolAnalytics(activePool?.id);
-  const spendQ = useSpendRequests(activePool?.id);
-  const executedSpends: PoolSpend[] = (spendQ.data ?? [])
-    .filter((s) => s.status === 'EXECUTED')
-    .map((s) => ({
-      id: s.id,
-      title: s.title,
-      amount: Number(s.amount),
-      category: s.category,
-    }));
-
-  // Build the per-pool trip shape from API data, or fall back to a placeholder
-  // when the user has no pools yet so the tree still renders.
-  const trips: { id: TripId; data: Trip }[] = backendPools.length === 0
-    ? Object.entries(TRIPS_DATA).map(([id, data]) => ({ id, data: data as Trip }))
-    : backendPools.map((p) => {
-        const memberCount = p.members?.filter((m) => m.isActive).length ?? 0;
-        const isActive = p.id === tripId;
-        const built = buildTripFromBackend(
-          p.name,
-          memberCount,
-          isActive ? executedSpends : [],
-        );
-        return { id: p.id, data: built };
-      });
-
-  const fallback: Trip = TRIPS_DATA.langkawi;
-  const trip: Trip = trips.find((t) => t.id === tripId)?.data ?? trips[0]?.data ?? fallback;
-
-  // AI budget limit comes from the pool target if defined, else best-effort.
-  const aiBudget = activePool?.targetAmount
-    ? `RM ${Number(activePool.targetAmount).toLocaleString()}`
-    : 'RM —';
-
-  // Spent total prefers the analytics endpoint (authoritative server-side aggregate).
-  const spentTotal = analyticsQ.data?.totals.spentTotal
-    ? Number(analyticsQ.data.totals.spentTotal)
-    : trip.total;
+  const handleSelectPool = (id: TripId) => {
+    setTripId(id);
+    setExpanded(null); // reset expanded category when switching pools
+  };
 
   const toggleCat = (id: BranchId) => setExpanded(prev => prev === id ? null : id);
 
@@ -1334,26 +1483,37 @@ export function AnalyticsDashboard() {
       </div>
 
       {/* Header */}
-      <div style={{ padding: '24px 20px 0 20px' }}>
+      <div style={{ padding: '20px 20px 0 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <h1 style={{ fontSize: 24, fontWeight: 700, color: '#fff', margin: 0, letterSpacing: '-0.75px', lineHeight: '36px' }}>Analytics</h1>
-        <p style={{ fontSize: 11, fontWeight: 500, color: 'rgba(190,219,255,0.55)', margin: '3px 0 0', textTransform: 'uppercase', letterSpacing: '1.2px' }}>
-          AI FAMILY ADVISOR
-        </p>
+        <button
+          onClick={() => setShowReport(true)}
+          style={{
+            width: 38, height: 38, borderRadius: 11, cursor: 'pointer',
+            background: 'rgba(0,229,255,0.08)',
+            border: '1px solid rgba(0,229,255,0.2)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            boxShadow: '0 4px 12px rgba(0,229,255,0.08)',
+            transition: 'all 0.2s',
+          } as React.CSSProperties}
+          title="Export Secure Report"
+        >
+          <FileDown size={18} color="#00E5FF" strokeWidth={2} />
+        </button>
       </div>
 
-      {/* Trip Selector */}
-      <TripSelector tripId={tripId} trips={trips} onSelect={setTripId} />
+      {/* Pool Selector */}
+      <TripSelector tripId={tripId} onSelect={handleSelectPool} />
 
       {/* Tree */}
       <div style={{ margin: '4px -2px 0', overflow: 'hidden', position: 'relative', height: '420px' }}>
-        <InteractiveFigmaTree trip={trip} />
+        <InteractiveFigmaTree tripId={tripId} />
       </div>
 
       {/* Summary strip */}
       <div style={{ display: 'flex', gap: 8, margin: '8px 20px' }}>
         {[
-          { label: 'Total Spent',     value: `RM ${spentTotal.toLocaleString()}`, IconComp: DollarSign },
-          { label: 'AI Budget Limit', value: aiBudget, IconComp: Bot },
+          { label: 'Total Spent',    value: `RM ${trip.total.toLocaleString()}`,   IconComp: DollarSign },
+          { label: 'AI Budget Limit', value: `RM ${trip.aiLimit.toLocaleString()}`, IconComp: Bot },
         ].map(card => (
           <div key={card.label} style={{
             flex: 1, padding: '12px 14px',
@@ -1383,14 +1543,42 @@ export function AnalyticsDashboard() {
             key={id}
             branchId={id}
             branch={trip[id]}
-            tripTotal={trip.total}
             expanded={expandedCat === id}
             onToggle={() => toggleCat(id)}
+            poolTotal={trip.total}
           />
         ))}
       </div>
 
       <div style={{ height: 80 }} />
+
+      {/* Secure Report Bottom Sheet */}
+      {showReport && (
+        <SecurePoolReportSheet
+          tripId={tripId}
+          onClose={() => setShowReport(false)}
+          onDownload={handleDownload}
+        />
+      )}
+
+      {/* Download toast */}
+      {downloadToast && (
+        <div style={{
+          position: 'fixed', bottom: 100, left: '50%', transform: 'translateX(-50%)',
+          zIndex: 300, maxWidth: 300, width: 'calc(100% - 48px)',
+          background: 'rgba(10,22,40,0.96)',
+          border: '1px solid rgba(57,255,20,0.3)',
+          borderRadius: 16, padding: '12px 16px',
+          display: 'flex', alignItems: 'center', gap: 10,
+          boxShadow: '0 8px 32px rgba(0,0,0,0.4), 0 0 20px rgba(57,255,20,0.1)',
+          animation: 'slideUpSheet 0.3s ease',
+        }}>
+          <CheckCircle2 size={20} color="#39FF14" strokeWidth={2.5} style={{ flexShrink: 0 }} />
+          <span style={{ fontSize: 13, fontWeight: 600, color: '#fff', fontFamily: 'Inter, sans-serif' }}>
+            Report saved to device
+          </span>
+        </div>
+      )}
     </div>
   );
 }

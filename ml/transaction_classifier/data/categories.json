@@ -1,0 +1,16 @@
+{
+  "categories": [
+    "accommodation", "food_dining", "groceries",
+    "transport_ride", "transport_petrol", "transport_flight",
+    "transport_toll", "transport_parking", "transport_rental",
+    "activities_entertainment", "shopping_personal", "shopping_souvenirs",
+    "utilities_electric", "utilities_water", "utilities_telco", "utilities_wifi",
+    "medical", "education", "insurance", "rent", "childcare",
+    "gov_grant", "transfer_personal", "other"
+  ],
+  "category_groups": {
+    "trip": ["accommodation","food_dining","groceries","transport_ride","transport_petrol","transport_flight","transport_toll","transport_parking","transport_rental","activities_entertainment","shopping_personal","shopping_souvenirs","other"],
+    "family": ["food_dining","groceries","utilities_electric","utilities_water","utilities_telco","utilities_wifi","medical","education","insurance","rent","childcare","transport_ride","transport_petrol","gov_grant","transfer_personal","other"],
+    "roommate": ["rent","utilities_electric","utilities_water","utilities_wifi","groceries","shopping_personal","other"]
+  }
+}

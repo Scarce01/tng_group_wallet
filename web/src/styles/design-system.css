@@ -158,3 +158,39 @@
 *::-webkit-scrollbar {
   display: none;               /* Chrome / Safari / WebKit */
 }
+
+/* 🎞️ POOL CARD DETAIL ANIMATION */
+@keyframes fadeSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes scanLine {
+  0% { top: 4%; }
+  50% { top: 88%; }
+  100% { top: 4%; }
+}
+
+@keyframes successPulse {
+  0% { transform: scale(0.7); opacity: 0; }
+  60% { transform: scale(1.1); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+.pool-detail-animate {
+  animation: fadeSlideUp 0.32s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+.scan-line {
+  animation: scanLine 2s ease-in-out infinite;
+}
+
+.success-icon {
+  animation: successPulse 0.5s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}

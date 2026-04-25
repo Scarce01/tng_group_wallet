@@ -15,3 +15,15 @@ __pycache__/
 .venv/
 venv/
 *.egg-info/
+
+# Local UI backup (kept on disk for reference, not for the repo)
+web_old/
+
+# ML training artifacts — code is in repo, models/data are too large
+ml/**/models/
+ml/**/data/synthetic_*
+ml/**/.venv/
+ml/**/__pycache__/
+*.onnx
+*.joblib
+*.safetensors

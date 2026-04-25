@@ -1,19 +1,25 @@
-import { useState } from 'react';
-import { useUiData } from '../api/useUiData';
-import { useContribute, useCreatePool, useCreateSpendRequest, useLogout, useMyTransactions, useVote } from '../api/hooks';
-import { useRealtimeSync } from '../api/useRealtimeSync';
+import { useEffect, useState } from 'react';
+import { usePools, usePoolTransactions, useSpendRequests } from '../api/hooks';
+import type {
+  Pool as ApiPool,
+  PoolMember as ApiPoolMember,
+  Transaction as ApiTransaction,
+  SpendRequest as ApiSpendRequest,
+} from '../api/client';
 import { CreatePoolDialog } from './components/CreatePoolDialog';
 import { NewSpendingRequestDialog } from './components/NewSpendingRequestDialog';
 import { TransactionDetailDialog } from './components/TransactionDetailDialog';
-import { PayWithPoolDialog } from './components/PayWithPoolDialog';
 import { ManageMembersDialog } from './components/ManageMembersDialog';
 import { TransactionFilterDropdown } from './components/TransactionFilterDropdown';
 import { ContributeToPoolDialog } from './components/ContributeToPoolDialog';
 import { PoolReportDialog } from './components/PoolReportDialog';
 import { AnalyticsDashboard } from './components/AnalyticsDashboard';
 import { ProfilePage } from './components/ProfilePage';
-import { LayakPage } from './components/LayakPage';
+import { ScanPage } from './components/ScanPage';
 import { ScamCheckPage } from './components/ScamCheckPage';
+import { PoolPage } from './components/PoolPage';
+import { FreezePoolSheet } from './components/FreezePoolSheet';
+import { SmartCallSheet } from './components/SmartCallSheet';
 import { Wallet, Plus, Users, TrendingUp, Bell, Settings, Shield, Gift, Home, GraduationCap, ShoppingCart, Zap, Building2, Utensils, Sparkles } from 'lucide-react';
 import svgPaths from '../imports/CardDetails/svg-3xzeber0v2';
 import navSvgPaths from '../imports/Container-3/svg-lc0haplezl';
@@ -21,12 +27,16 @@ import CreatePoolButton from '../imports/Button-1/Button-2096-218';
 import scanPayButtonSvgPaths from '../imports/Button-1-1/svg-f46060bysf';
 import figmaHomeSvgPaths from '../imports/App-1/svg-wu2qq70riw';
 
+import { motion as Motion, AnimatePresence } from 'motion/react';
+
 interface Pool {
   id: string;
   name: string;
   recommendedContribution: number;
   currentBalance: number;
   members: Member[];
+  color?: string;
+  photo?: string;
 }
 
 interface Member {
@@ -66,58 +76,374 @@ interface Transaction {
   remainingBalance?: number;
 }
 
-type TabView = 'home' | 'split' | 'analytics' | 'profile' | 'layak' | 'scamcheck';
+type TabView = 'home' | 'split' | 'analytics' | 'profile' | 'scamcheck' | 'scan';
+
+// Color palette for backend-sourced pools (cycles by index)
+const POOL_GRADIENTS = [
+  'linear-gradient(135deg, #0059BD 0%, #1777B1 100%)',
+  'linear-gradient(135deg, #0A2463 0%, #2B5BE8 100%)',
+  'linear-gradient(135deg, #065F46 0%, #10B981 100%)',
+  'linear-gradient(135deg, #7C2D12 0%, #F97316 100%)',
+  'linear-gradient(135deg, #581C87 0%, #A855F7 100%)',
+];
+
+function formatTimestamp(iso: string): string {
+  const d = new Date(iso);
+  const now = new Date();
+  const sameDay = d.toDateString() === now.toDateString();
+  const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
+  const isYesterday = d.toDateString() === yesterday.toDateString();
+  const time = d.toLocaleTimeString('en-MY', { hour: 'numeric', minute: '2-digit', hour12: true });
+  if (sameDay) return `Today, ${time}`;
+  if (isYesterday) return `Yesterday, ${time}`;
+  return `${d.getDate()} ${d.toLocaleString('en-MY', { month: 'short' })}, ${time}`;
+}
+
+function adaptApiSpendRequest(r: ApiSpendRequest): SpendingRequest {
+  const approveVotes = (r.votes ?? []).filter((v) => v.decision === 'APPROVE');
+  const totalVotes = (r.votes ?? []).length;
+  const status: SpendingRequest['status'] =
+    r.status === 'APPROVED' || r.status === 'EXECUTED' ? 'approved'
+    : r.status === 'REJECTED' || r.status === 'EXPIRED' || r.status === 'CANCELLED' ? 'rejected'
+    : 'pending';
+  return {
+    id: r.id,
+    description: r.title || r.description || 'Spend request',
+    amount: Number(r.amount ?? 0) || 0,
+    requester: r.requester?.displayName ?? 'Unknown',
+    votes: { approved: approveVotes.length, total: Math.max(totalVotes, 1) },
+    status,
+    isLarge: r.isEmergency || Number(r.amount ?? 0) >= 500,
+    approvers: approveVotes.map((v) => (v as unknown as { user?: { displayName?: string } }).user?.displayName ?? 'Member'),
+  };
+}
+
+function adaptApiTransaction(t: ApiTransaction): Transaction {
+  return {
+    id: t.id,
+    poolId: t.poolId ?? '',
+    type: t.direction === 'IN' ? 'contribution' : 'spending',
+    description: t.description,
+    amount: Number(t.amount ?? 0) || 0,
+    person: t.user?.displayName ?? 'Unknown',
+    timestamp: formatTimestamp(t.createdAt),
+    remainingBalance: Number(t.balanceAfter ?? 0) || undefined,
+  };
+}
+
+function adaptApiPool(p: ApiPool, idx: number): Pool {
+  return {
+    id: p.id,
+    name: p.name,
+    recommendedContribution: Number(p.targetAmount ?? 0) || 0,
+    currentBalance: Number(p.currentBalance ?? 0) || 0,
+    color: POOL_GRADIENTS[idx % POOL_GRADIENTS.length],
+    members: ((p as unknown as { members?: ApiPoolMember[] }).members ?? []).map((m) => ({
+      id: m.id,
+      name: m.user?.displayName ?? '?',
+      contribution: 0, // requires per-pool /members fetch with contributedTotal
+      status: m.isActive ? 'paid' : 'pending',
+    })),
+  };
+}
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<TabView>('home');
+  const [activeTab, setActiveTab] = useState<TabView>('split');
+  const [isStackExpanded, setIsStackExpanded] = useState(false);
+  const [activePoolId, setActivePoolId] = useState<string>('1');
   const [showCreatePool, setShowCreatePool] = useState(false);
   const [showNewRequest, setShowNewRequest] = useState(false);
-  const [showPayWithPool, setShowPayWithPool] = useState(false);
   const [showManageMembers, setShowManageMembers] = useState(false);
   const [showContributeDialog, setShowContributeDialog] = useState(false);
   const [showReportDialog, setShowReportDialog] = useState(false);
   const [selectedPoolId, setSelectedPoolId] = useState<string | null>(null);
   const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
+  const [currentUser] = useState('Amanda');
   const [transactionFilter, setTransactionFilter] = useState<string>('all');
   const [viewingPoolId, setViewingPoolId] = useState<string | null>(null);
 
-  // === BACKEND DATA (replaces hardcoded mocks) ============================
-  const ui = useUiData();
-  const currentUser = ui.me?.displayName ?? '';
+  // ── Time filter for Recent Transactions ──
+  const [timeFilter, setTimeFilter] = useState<string>('All Time');
+  const [showTimeFilter, setShowTimeFilter] = useState(false);
 
-  // Live updates: subscribe to all of my pools so vote/balance/spend events
-  // trigger React Query invalidation across the app (no manual refresh).
-  useRealtimeSync(ui.backendPools.map((p) => p.id));
+  // ── AI Advisor action sheet states ──
+  const [showFreezeSheet, setShowFreezeSheet] = useState(false);
+  const [showSmartCallSheet, setShowSmartCallSheet] = useState(false);
+  const [contributeVotingPowerMode, setContributeVotingPowerMode] = useState(false);
+  const [appToast, setAppToast] = useState<string | null>(null);
 
-  // Personal cross-pool transactions (Recent Transactions card on Home tab).
-  const myTxQ = useMyTransactions(10);
-  const myRecentTransactions = (myTxQ.data ?? []).slice(0, 3);
-
-  // Empty fallback so UI renders during initial load instead of crashing on
-  // pool[0].members access.
-  const FALLBACK_POOL: Pool = {
-    id: '__loading__',
-    name: 'Loading…',
-    recommendedContribution: 0,
-    currentBalance: 0,
-    members: [],
+  const showToast = (msg: string) => {
+    setAppToast(msg);
+    setTimeout(() => setAppToast(null), 3200);
   };
-  const pools: Pool[] = ui.pools.length > 0 ? ui.pools : [FALLBACK_POOL];
+
+  const [pools, setPools] = useState<Pool[]>([
+    {
+      id: '1',
+      name: 'Education',
+      recommendedContribution: 75,
+      currentBalance: 200,
+      color: 'linear-gradient(135deg, #0059BD 0%, #1777B1 100%)',
+      members: [
+        { id: '1', name: 'Amanda', contribution: 75, status: 'paid' },
+        { id: '2', name: 'Ahmad', contribution: 75, status: 'paid' },
+        { id: '3', name: 'Fatimah', contribution: 75, status: 'paid' },
+        { id: '4', name: 'Razak', contribution: 75, status: 'paid' },
+      ],
+    },
+    {
+      id: '2',
+      name: 'House',
+      recommendedContribution: 400,
+      currentBalance: 500,
+      color: 'linear-gradient(135deg, #0A2463 0%, #2B5BE8 100%)',
+      members: [
+        { id: '1', name: 'Amanda', contribution: 400, status: 'paid' },
+        { id: '2', name: 'Ahmad', contribution: 400, status: 'paid' },
+      ],
+    },
+    {
+      id: '3',
+      name: 'Groceries',
+      recommendedContribution: 200,
+      currentBalance: 150,
+      color: 'linear-gradient(135deg, #065F46 0%, #10B981 100%)',
+      members: [
+        { id: '1', name: 'Amanda', contribution: 100, status: 'paid' },
+        { id: '2', name: 'Ahmad', contribution: 100, status: 'paid' },
+        { id: '3', name: 'Fatimah', contribution: 50, status: 'pending' },
+      ],
+    },
+  ]);
+
+  // ── Sync pool list from backend (Phase 2b) ────────────────────────────────
+  // Local fallback pools above are seed data only. When the API responds, we
+  // replace them with real pools. setPools is preserved so optimistic
+  // updates from CreatePoolDialog/ContributeToPoolDialog still work; mutations
+  // (Phase 2c) will invalidate the query and re-sync via this effect.
+  const poolsQuery = usePools();
+  useEffect(() => {
+    if (poolsQuery.data && poolsQuery.data.length > 0) {
+      const adapted = poolsQuery.data.map(adaptApiPool);
+      setPools(adapted);
+      // Reset activePoolId to first real pool (hardcoded '1' won't exist after sync)
+      setActivePoolId((prev) => (adapted.some(p => p.id === prev) ? prev : adapted[0].id));
+    }
+  }, [poolsQuery.data]);
+
+  // ── Sync transactions for active pool from backend (Phase 2c) ─────────────
+  // The backend exposes /pools/{id}/transactions (per-pool); switching active
+  // pool refetches. Only the active pool's tx list is live; other pools fall
+  // back to seed data baked into the initial useState above until visited.
+  const txQuery = usePoolTransactions(activePoolId);
+  useEffect(() => {
+    if (txQuery.data) {
+      const live = txQuery.data.map(adaptApiTransaction);
+      setTransactions((prev) => {
+        const others = prev.filter((t) => t.poolId !== activePoolId);
+        return [...live, ...others];
+      });
+    }
+  }, [txQuery.data, activePoolId]);
+
+  // ── Sync spending requests for active pool from backend (Phase 2d) ────────
+  const spendQuery = useSpendRequests(activePoolId);
+  useEffect(() => {
+    if (spendQuery.data) {
+      setSpendingRequests(spendQuery.data.map(adaptApiSpendRequest));
+    }
+  }, [spendQuery.data]);
+
+  // For compatibility with existing code that uses 'pool'
   const pool = pools[0];
 
-  const setPools = (_: unknown) => { /* no-op — React Query is the source of truth */ };
+  const [spendingRequests, setSpendingRequests] = useState<SpendingRequest[]>([
+    {
+      id: '1',
+      description: 'Hotel booking - 3 nights at Langkawi Beach Resort',
+      amount: 600,
+      requester: 'Sarah',
+      votes: { approved: 3, total: 5 },
+      status: 'pending',
+      isLarge: true,
+      approvers: ['Ahmad', 'Kumar', 'Wei Ling'],
+    },
+    {
+      id: '2',
+      description: 'Rental car for 3 days',
+      amount: 200,
+      requester: 'Kumar',
+      votes: { approved: 4, total: 5 },
+      status: 'approved',
+      approvers: ['Ahmad', 'Sarah', 'Wei Ling', 'Farah'],
+    },
+    {
+      id: '3',
+      description: 'Welcome dinner at seafood restaurant',
+      amount: 150,
+      requester: 'Wei Ling',
+      votes: { approved: 2, total: 5 },
+      status: 'pending',
+      approvers: ['Ahmad', 'Sarah'],
+    },
+  ]);
 
-  // Mutations — invalidate React Query caches on success.
-  const contributeFor = useContribute(selectedPoolId ?? undefined);
-  const createSpendFor = useCreateSpendRequest(viewingPoolId ?? selectedPoolId ?? pool.id);
-  const voteOnPool = useVote(viewingPoolId ?? selectedPoolId ?? pool.id);
-  const createPoolM = useCreatePool();
-  const logoutM = useLogout();
+  const [transactions, setTransactions] = useState<Transaction[]>([
+    // Education Fund Transactions (Pool ID: '1')
+    {
+      id: '1',
+      poolId: '1',
+      type: 'contribution',
+      description: 'STR Grant → Added to Edu Pool',
+      amount: 150,
+      person: 'Grant',
+      timestamp: 'Today, 10:30 AM',
+      category: 'Grant',
+      notes: 'Government aid automatically added to Education pool'
+    },
+    {
+      id: '2',
+      poolId: '1',
+      type: 'contribution',
+      description: 'Initial contribution',
+      amount: 75,
+      person: 'Amanda',
+      timestamp: '20 Apr, 9:00 AM',
+    },
+    {
+      id: '3',
+      poolId: '1',
+      type: 'contribution',
+      description: 'Initial contribution',
+      amount: 75,
+      person: 'Ahmad',
+      timestamp: '20 Apr, 9:00 AM',
+    },
+    {
+      id: '4',
+      poolId: '1',
+      type: 'contribution',
+      description: 'Initial contribution',
+      amount: 75,
+      person: 'Fatimah',
+      timestamp: '20 Apr, 9:00 AM',
+    },
+    {
+      id: '5',
+      poolId: '1',
+      type: 'contribution',
+      description: 'Initial contribution',
+      amount: 75,
+      person: 'Razak',
+      timestamp: '20 Apr, 9:00 AM',
+    },
 
-  const spendingRequests: SpendingRequest[] = ui.spendingRequests;
-  const setSpendingRequests = (_: unknown) => { /* no-op — managed by React Query */ };
-
-  const transactions: Transaction[] = ui.transactions;
+    // Household Transactions (Pool ID: '2')
+    {
+      id: '6',
+      poolId: '2',
+      type: 'contribution',
+      description: 'Cleaning Job',
+      amount: 50,
+      person: 'Amanda',
+      timestamp: 'Yesterday, 8:45 AM',
+      category: 'Income',
+    },
+    {
+      id: '7',
+      poolId: '2',
+      type: 'spending',
+      description: '99 Speedmart',
+      amount: 45,
+      person: 'Ahmad',
+      timestamp: '19 Apr, 3:30 PM',
+      location: '99 Speedmart Taman Melati',
+      category: 'Groceries',
+    },
+    {
+      id: '8',
+      poolId: '2',
+      type: 'contribution',
+      description: 'Initial contribution',
+      amount: 400,
+      person: 'Amanda',
+      timestamp: '18 Apr, 10:00 AM',
+    },
+    {
+      id: '9',
+      poolId: '2',
+      type: 'contribution',
+      description: 'Initial contribution',
+      amount: 400,
+      person: 'Ahmad',
+      timestamp: '18 Apr, 10:00 AM',
+    },
+    {
+      id: '10',
+      poolId: '2',
+      type: 'spending',
+      description: 'Electric Bill',
+      amount: 85,
+      person: 'Amanda',
+      timestamp: '17 Apr, 2:15 PM',
+      location: 'TNB Online',
+      category: 'Utilities',
+    },
+    {
+      id: '11',
+      poolId: '2',
+      type: 'spending',
+      description: 'Wet Market',
+      amount: 70,
+      person: 'Ahmad',
+      timestamp: '16 Apr, 7:00 AM',
+      location: 'Pasar Pagi Wangsa Maju',
+      category: 'Groceries',
+    },
+    // Groceries Pool Transactions (Pool ID: '3')
+    {
+      id: '12',
+      poolId: '3',
+      type: 'contribution',
+      description: 'Monthly contribution',
+      amount: 100,
+      person: 'Amanda',
+      timestamp: '22 Apr, 9:00 AM',
+      category: 'Contribution',
+    },
+    {
+      id: '13',
+      poolId: '3',
+      type: 'contribution',
+      description: 'Monthly contribution',
+      amount: 100,
+      person: 'Ahmad',
+      timestamp: '22 Apr, 9:00 AM',
+      category: 'Contribution',
+    },
+    {
+      id: '14',
+      poolId: '3',
+      type: 'spending',
+      description: 'Giant Hypermarket',
+      amount: 88,
+      person: 'Amanda',
+      timestamp: '23 Apr, 5:00 PM',
+      location: 'Giant Wangsa Maju',
+      category: 'Groceries',
+    },
+    {
+      id: '15',
+      poolId: '3',
+      type: 'spending',
+      description: 'Aeon Supermarket',
+      amount: 62,
+      person: 'Ahmad',
+      timestamp: '24 Apr, 11:30 AM',
+      location: 'Aeon Mid Valley',
+      category: 'Groceries',
+    },
+  ]);
 
   const splits = pool.members.map((member) => {
     const totalSpent = 850;
@@ -130,60 +456,89 @@ export default function App() {
     };
   });
 
-  const handleCreatePool = (newPool: { name: string; recommendedContribution: number }) => {
-    const target = newPool.recommendedContribution > 0
-      ? (newPool.recommendedContribution * 4).toFixed(2) // assume ~4 members
-      : undefined;
-    createPoolM.mutate({
-      type: 'FAMILY',
+  const handleCreatePool = (newPool: { name: string; recommendedContribution: number; color?: string; photo?: string }) => {
+    const createdPool: Pool = {
+      id: Date.now().toString(),
       name: newPool.name,
-      targetAmount: target,
-    });
+      recommendedContribution: newPool.recommendedContribution,
+      currentBalance: 0,
+      members: [],
+      color: newPool.color,
+      photo: newPool.photo,
+    };
+    setPools(prev => [...prev, createdPool]);
   };
 
   const handleContribute = (amount: number) => {
-    if (!selectedPoolId) return;
-    contributeFor.mutate(
-      { amount: amount.toFixed(2) },
-      {
-        onError: (e: Error) => {
-          // eslint-disable-next-line no-alert
-          alert(`Could not contribute: ${e.message}`);
-        },
-      }
-    );
+    if (selectedPoolId) {
+      setPools(prev => prev.map(p => {
+        if (p.id === selectedPoolId) {
+          // Check if current user already contributed
+          const existingMember = p.members.find(m => m.name === currentUser);
+
+          if (existingMember) {
+            // Don't allow contributing again - user already contributed
+            return p;
+          } else {
+            // Add new member
+            return {
+              ...p,
+              currentBalance: p.currentBalance + amount,
+              members: [
+                ...p.members,
+                {
+                  id: Date.now().toString(),
+                  name: currentUser,
+                  contribution: amount,
+                  status: 'paid' as const
+                }
+              ]
+            };
+          }
+        }
+        return p;
+      }));
+    }
   };
 
   const handleVote = (requestId: string, approved: boolean) => {
-    voteOnPool.mutate(
-      { spendRequestId: requestId, decision: approved ? 'APPROVE' : 'REJECT' },
-      {
-        onError: (e: Error) => {
-          // eslint-disable-next-line no-alert
-          alert(`Could not vote: ${e.message}`);
-        },
-      }
+    setSpendingRequests((prev) =>
+      prev.map((req) => {
+        if (req.id === requestId) {
+          const newApproved = approved ? req.votes.approved + 1 : req.votes.approved;
+          const newApprovers = [...req.approvers, currentUser];
+          const newStatus =
+            newApproved >= 3
+              ? 'approved'
+              : req.votes.total - newApprovers.length < 3 - newApproved
+              ? 'rejected'
+              : 'pending';
+
+          return {
+            ...req,
+            votes: { ...req.votes, approved: newApproved },
+            approvers: newApprovers,
+            status: newStatus,
+          };
+        }
+        return req;
+      })
     );
   };
 
   const handleCreateRequest = (request: { description: string; amount: number }) => {
-    if (!viewingPoolId && !selectedPoolId && !pool.id) return;
-    createSpendFor.mutate(
-      {
-        amount: request.amount.toFixed(2),
-        title: request.description.slice(0, 100),
-        description: request.description.length > 100 ? request.description : undefined,
-        // Default category — the create dialog can be enhanced later to pick one.
-        // We use the wide-net "OTHER_FAMILY" since this UI is family-pool centric.
-        category: 'OTHER_FAMILY',
-      },
-      {
-        onError: (e: Error) => {
-          // eslint-disable-next-line no-alert
-          alert(`Could not create request: ${e.message}`);
-        },
-      }
-    );
+    const isLarge = request.amount > 400;
+    const newRequest: SpendingRequest = {
+      id: Date.now().toString(),
+      description: request.description,
+      amount: request.amount,
+      requester: currentUser,
+      votes: { approved: 0, total: pool.members.length },
+      status: 'pending',
+      isLarge,
+      approvers: [],
+    };
+    setSpendingRequests((prev) => [newRequest, ...prev]);
   };
 
   const totalContributed = pool.members.reduce((sum, m) => sum + m.contribution, 0);
@@ -198,342 +553,366 @@ export default function App() {
         <div className="flex-1 overflow-hidden">
           {/* Home Tab */}
           {activeTab === 'home' && (
-            <div className="h-full overflow-y-auto pb-20" style={{ background: 'transparent' }}>
-              {/* Header with Greeting */}
-              <div className="px-5 pt-8 pb-6">
-                <div className="flex items-center justify-between mb-6">
-                  <div className="flex items-center gap-3">
-                    <div
-                      className="w-12 h-12 rounded-full flex items-center justify-center"
-                      style={{ background: 'linear-gradient(135deg, #005AFF 0%, #4DA3FF 100%)' }}
-                    >
-                      <span className="text-lg font-bold text-white" style={{ fontFamily: 'Inter, sans-serif' }}>{(currentUser || 'U').charAt(0).toUpperCase()}</span>
-                    </div>
-                    <div>
-                      <p className="text-xs" style={{ color: '#6B7280', fontFamily: 'Inter, sans-serif' }}>Good morning,</p>
-                      <h1 className="text-lg font-bold" style={{ color: '#1A1A1A', fontFamily: 'Inter, sans-serif' }}>{currentUser || '—'}</h1>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      className="w-10 h-10 rounded-full flex items-center justify-center"
-                      style={{ background: '#FFFFFF' }}
-                      onClick={() => logoutM.mutate()}
-                      title="Log out"
-                    >
-                      <svg className="w-5 h-5" viewBox="0 0 20 20" fill="none">
-                        <path d={figmaHomeSvgPaths.p1c3efea0} stroke="#6B7280" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.66667" />
-                        <path d={figmaHomeSvgPaths.p25877f40} stroke="#6B7280" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.66667" />
-                      </svg>
-                    </button>
-                  </div>
-                </div>
+            (() => {
+              const activePool = pools.find(p => p.id === activePoolId) || pools[0];
+              const activeTransactions = transactions.filter(t => t.poolId === activePool.id);
+              const income = activePool.members.reduce((s, m) => s + m.contribution, 0) || activePool.currentBalance + 200;
+              const used = activeTransactions.filter(t => t.type === 'spending').reduce((s, t) => s + t.amount, 0) || 150;
+              const percentage = Math.min((used / (income || 1)) * 100, 100);
 
-                {/* Personal Balance Card with Actions Inside */}
-                <div
-                  className="overflow-hidden relative rounded-[24px] shadow-[0px_8px_24px_0px_rgba(0,90,255,0.15)]"
-                  style={{
-                    height: '189px',
-                    backgroundImage: "url('data:image/svg+xml;utf8,<svg viewBox=\\'0 0 362 189\\' xmlns=\\'http://www.w3.org/2000/svg\\' preserveAspectRatio=\\'none\\'><rect x=\\'0\\' y=\\'0\\' height=\\'100%\\' width=\\'100%\\' fill=\\'url(%23grad)\\' opacity=\\'1\\'/><defs><radialGradient id=\\'grad\\' gradientUnits=\\'userSpaceOnUse\\' cx=\\'0\\' cy=\\'0\\' r=\\'10\\' gradientTransform=\\'matrix(18.1 9.45 -36.2 18.9 181 94.5)\\'><stop stop-color=\\'rgba(6,65,135,1)\\' offset=\\'0\\'/><stop stop-color=\\'rgba(0,89,189,1)\\' offset=\\'0.47115\\'/><stop stop-color=\\'rgba(10,110,182,1)\\' offset=\\'0.73558\\'/><stop stop-color=\\'rgba(20,131,174,1)\\' offset=\\'1\\'/></radialGradient></defs></svg>')"
-                  }}
-                >
-                  {/* Top overlay gradient */}
-                  <div
-                    className="absolute h-[202px] left-0 top-0 w-full"
-                    style={{ backgroundImage: "url('data:image/svg+xml;utf8,<svg viewBox=\\'0 0 372 202\\' xmlns=\\'http://www.w3.org/2000/svg\\' preserveAspectRatio=\\'none\\'><rect x=\\'0\\' y=\\'0\\' height=\\'100%\\' width=\\'100%\\' fill=\\'url(%23grad)\\' opacity=\\'1\\'/><defs><radialGradient id=\\'grad\\' gradientUnits=\\'userSpaceOnUse\\' cx=\\'0\\' cy=\\'0\\' r=\\'10\\' gradientTransform=\\'matrix(0 -40.197 -43.027 0 372 0)\\'><stop stop-color=\\'rgba(255,255,255,0.1)\\' offset=\\'0\\'/><stop stop-color=\\'rgba(128,128,128,0.05)\\' offset=\\'0.5\\'/><stop stop-color=\\'rgba(0,0,0,0)\\' offset=\\'1\\'/></radialGradient></defs></svg>')" }}
-                  />
-
-                  <div className="absolute h-[153.575px] left-[32px] top-[15px] right-[32px]">
-                    {/* Wallet Balance Label */}
-                    <div className="absolute content-stretch flex h-[15.988px] items-start left-0 top-0 right-0">
-                      <p className="flex-1 font-semibold leading-[16px] relative text-[12px] text-[rgba(255,255,255,0.7)]" style={{ fontFamily: 'Open Sans, sans-serif', fontVariationSettings: "'wdth' 100" }}>
-                        Total Family Funds
-                      </p>
-                    </div>
-
-                    {/* Balance Amount */}
-                    <div className="absolute h-[40px] left-0 top-[23.99px] right-0">
-                      <p className="absolute font-bold leading-[40px] left-0 text-[36px] text-white top-[-2px] whitespace-nowrap" style={{ fontFamily: 'Open Sans, sans-serif', fontVariationSettings: "'wdth' 100" }}>
-                        RM {ui.totalPersonalBalance.toFixed(2)}
-                      </p>
-                    </div>
-
-                    {/* Active Pools Indicator */}
-                    <div className="absolute content-stretch flex gap-[8px] h-[15.988px] items-center left-0 top-[67.99px] right-0">
-                      <div className="bg-[#05df72] rounded-full shrink-0 size-[8px]" />
-                      <div className="h-[15.988px] relative shrink-0">
-                        <p className="font-normal leading-[16px] relative text-[12px] text-[rgba(255,255,255,0.9)] whitespace-nowrap" style={{ fontFamily: 'Open Sans, sans-serif', fontVariationSettings: "'wdth' 100" }}>
-                          Active pools: {pools.filter((p) => p.id !== '__loading__').length}
-                        </p>
-                      </div>
-                    </div>
-
-                    {/* Scan & Pay Button */}
-                    <button
-                      onClick={() => setShowPayWithPool(true)}
-                      className="absolute bg-[rgba(255,255,255,0.15)] content-stretch flex gap-[8px] items-center justify-center left-0 px-[100.6px] py-[12.8px] rounded-[16px] top-[98px] right-0 press-scale"
-                      style={{ position: 'relative' }}
-                    >
-                      <div aria-hidden="true" className="absolute border-[0.8px] border-[rgba(255,255,255,0.2)] border-solid inset-0 pointer-events-none rounded-[16px]" />
-                      <div className="relative shrink-0 size-[20px]">
-                        <svg className="absolute block inset-0 size-full" fill="none" preserveAspectRatio="none" viewBox="0 0 20 20">
-                          <g>
-                            <path d={scanPayButtonSvgPaths.pf942a70} stroke="white" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.66667" />
-                            <path d={scanPayButtonSvgPaths.p3de9ee00} stroke="white" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.66667" />
-                            <path d={scanPayButtonSvgPaths.pbdf4440} stroke="white" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.66667" />
-                            <path d={scanPayButtonSvgPaths.p1fb905c0} stroke="white" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.66667" />
-                          </g>
-                        </svg>
-                      </div>
-                      <div className="h-[20px] relative shrink-0 w-[69.6px]">
-                        <div className="bg-clip-padding border-0 border-[transparent] border-solid relative size-full">
-                          <p className="-translate-x-1/2 absolute font-['Open_Sans:SemiBold',sans-serif] font-semibold leading-[20px] left-[35px] text-[14px] text-center text-white top-[-0.2px] whitespace-nowrap" style={{ fontVariationSettings: "'wdth' 100" }}>
-                            Scan & Pay
-                          </p>
+              return (
+                <div className="h-full overflow-y-auto pb-20" style={{ background: 'transparent' }}>
+                  {/* ── HEADER ── */}
+                  <div className="px-5 pt-8 pb-2 relative z-20">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div
+                          className="w-12 h-12 rounded-full flex items-center justify-center shadow-md"
+                          style={{ background: 'linear-gradient(135deg, #005AFF 0%, #4DA3FF 100%)' }}
+                        >
+                          <span className="text-lg font-bold text-white" style={{ fontFamily: 'Inter, sans-serif' }}>{currentUser.charAt(0)}</span>
+                        </div>
+                        <div>
+                          <p className="text-xs" style={{ color: '#6B7280', fontFamily: 'Inter, sans-serif' }}>Good morning,</p>
+                          <h1 className="text-lg font-bold" style={{ color: '#1A1A1A', fontFamily: 'Inter, sans-serif' }}>{currentUser} 👋</h1>
                         </div>
                       </div>
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {/* This Month Summary */}
-              <div className="px-5 mb-6">
-                <div className="floating-card" style={{
-                  background: '#FFFFFF',
-                  borderRadius: '16px',
-                  padding: '14px 16px',
-                  boxShadow: '0 2px 8px rgba(0, 0, 0, 0.04)',
-                  height: '148.8px'
-                }}>
-                  <h3 className="text-sm font-bold mb-3" style={{ color: '#1A1A1A', fontFamily: 'Inter, sans-serif' }}>This Month</h3>
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs" style={{ color: '#6B7280', fontFamily: 'Inter, sans-serif' }}>Income</span>
-                      <span className="text-sm font-bold" style={{ color: '#1A1A1A', fontFamily: 'Inter, sans-serif' }}>RM 900</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs" style={{ color: '#6B7280', fontFamily: 'Inter, sans-serif' }}>Used</span>
-                      <span className="text-sm font-bold" style={{ color: '#1A1A1A', fontFamily: 'Inter, sans-serif' }}>RM 700</span>
-                    </div>
-                    <div className="pt-2.5 border-t flex items-center justify-between" style={{ borderColor: '#F3F4F6', borderTopWidth: '0.8px' }}>
-                      <span className="text-xs font-bold" style={{ color: '#1A1A1A', fontFamily: 'Inter, sans-serif' }}>Left</span>
-                      <span className="text-lg font-bold" style={{ color: '#0055D6', fontFamily: 'Inter, sans-serif' }}>RM 200</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Government Aid + Scam Check Row */}
-              <div className="px-5 mb-6">
-                <div className="grid grid-cols-2 gap-3">
-                  {/* Aid Ready */}
-                  <div
-                    onClick={() => setActiveTab('layak')}
-                    className="floating-card press-scale cursor-pointer"
-                    style={{
-                      background: '#DBE7FF',
-                      borderRadius: '14px',
-                      padding: '14.8px 12.8px 0.8px 12.8px',
-                      boxShadow: '0 2px 8px rgba(0, 0, 0, 0.04)',
-                      height: '153.563px'
-                    }}
-                  >
-                    <div className="text-center">
-                      <div className="mb-2 flex items-center justify-center">
-                        <Gift className="w-8 h-8" style={{ color: '#0055D6' }} />
-                      </div>
-                      <p className="text-xs font-semibold mb-2" style={{ color: '#101828', fontFamily: 'Inter, sans-serif' }}>Aid Ready</p>
-                      <p className="text-lg font-bold mb-2" style={{ color: '#101828', fontFamily: 'Inter, sans-serif' }}>RM 200</p>
-                      <button className="w-full text-xs font-bold py-1.5 rounded-lg" style={{ background: '#0055D6', color: '#fff', fontFamily: 'Inter, sans-serif' }}>
-                        Claim
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Scam Check */}
-                  <div
-                    onClick={() => setActiveTab('scamcheck')}
-                    className="floating-card" style={{
-                    background: '#DBE7FF',
-                    borderRadius: '14px',
-                    padding: '0 13px',
-                    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.04)',
-                    height: '153.563px',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                    cursor: 'pointer'
-                  }}>
-                    <div className="text-center" style={{ marginTop: '17.2px', flex: 1 }}>
-                      <div className="mb-2 flex items-center justify-center">
-                        <Shield className="w-8 h-8" style={{ color: '#0055D6' }} />
-                      </div>
-                      <p className="text-xs font-bold mb-2" style={{ color: '#101828', fontFamily: 'Inter, sans-serif' }}>Scam Check</p>
-                      <div className="flex items-center justify-center gap-1.5 mb-6">
-                        <div className="w-1.5 h-1.5 rounded-full" style={{ background: '#10B981' }} />
-                        <p className="text-[10px] font-semibold" style={{ color: '#10B981', fontFamily: 'Inter, sans-serif' }}>No scam detected</p>
+                      <div className="flex items-center gap-2">
+                        <button
+                          className="w-10 h-10 rounded-full flex items-center justify-center relative"
+                          style={{ background: '#FFFFFF', boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}
+                        >
+                          <Bell className="w-5 h-5" style={{ color: '#6B7280' }} />
+                          <span className="absolute top-2 right-2 w-2 h-2 rounded-full" style={{ background: '#005AFF' }} />
+                        </button>
                       </div>
                     </div>
-                    <button className="w-full text-xs font-bold py-1.5 rounded-lg mb-4" style={{ background: '#0055D6', color: '#fff', fontFamily: 'Inter, sans-serif' }}>
-                      Check
-                    </button>
                   </div>
-                </div>
-              </div>
 
-              {/* Active Pools Section */}
-              <div className="px-5 mb-6">
-                <div className="flex items-center justify-between mb-3">
-                  <h2 className="text-base font-bold" style={{ color: '#1A1A1A', fontFamily: 'Inter, sans-serif' }}>Active Family Pools</h2>
-                  <button
-                    onClick={() => setActiveTab('split')}
-                    className="text-xs font-bold"
-                    style={{ color: '#005AFF', fontFamily: 'Inter, sans-serif' }}
-                  >
-                    View All →
-                  </button>
-                </div>
-                <div className="space-y-3">
-                  {pools.filter((p) => p.id !== '__loading__').map((p, idx) => {
-                    const target = p.recommendedContribution > 0 ? p.recommendedContribution * (p.members.length || 1) : 0;
-                    const progressPct = target > 0 ? Math.min(100, (p.currentBalance / target) * 100) : 0;
-                    const Icon = idx === 0 ? GraduationCap : Home;
-                    return (
-                      <div
-                        key={p.id}
-                        onClick={() => {
-                          setViewingPoolId(p.id);
-                          setActiveTab('split');
-                        }}
-                        className="floating-card press-scale cursor-pointer"
-                        style={{
-                          background: '#FFFFFF',
-                          borderRadius: '16px',
-                          padding: '16px',
-                          boxShadow: '0 4px 16px rgba(0, 0, 0, 0.06)',
-                          minHeight: '93.988px'
-                        }}
-                      >
-                        <div className="flex items-center justify-between mb-3">
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2 mb-0.5">
-                              <Icon className="w-4 h-4" style={{ color: '#005AFF' }} />
-                              <h3 className="text-sm font-bold" style={{ color: '#1A1A1A', fontFamily: 'Inter, sans-serif' }}>{p.name}</h3>
+                  {/* ── CARD STACK HERO SECTION ── */}
+                  <div className="px-5 mt-4 relative z-10">
+                    <div 
+                      className="relative w-full transition-all duration-500" 
+                      style={{ height: isStackExpanded ? `${pools.length * 150 + 60}px` : '210px' }}
+                    >
+                      {pools.map((poolItem, index) => {
+                        const isActive = poolItem.id === activePoolId;
+                        const others = pools.filter(p => p.id !== activePoolId);
+                        const otherIndex = others.findIndex(p => p.id === poolItem.id);
+                        
+                        const isTop = isActive;
+                        
+                        let yPos = isTop ? 0 : 25 + otherIndex * 20;
+                        let scale = isTop ? 1 : 0.95 - otherIndex * 0.05;
+                        let zIndex = isTop ? 40 : 30 - otherIndex;
+                        let opacity = isTop ? 1 : 1 - otherIndex * 0.2;
+                        
+                        if (isStackExpanded) {
+                          yPos = index * 150; 
+                          scale = 1;
+                          zIndex = pools.length - index; 
+                          opacity = 1;
+                        }
+                        
+                        return (
+                          <Motion.div
+                            key={poolItem.id}
+                            layout
+                            onClick={() => {
+                              if (isStackExpanded) {
+                                setActivePoolId(poolItem.id);
+                                setIsStackExpanded(false);
+                              } else if (!isTop) {
+                                setIsStackExpanded(true);
+                                setActivePoolId(poolItem.id);
+                              } else {
+                                setIsStackExpanded(true);
+                              }
+                            }}
+                            initial={false}
+                            animate={{ y: yPos, scale, zIndex, opacity }}
+                            transition={{ type: 'spring', stiffness: 260, damping: 20 }}
+                            className="absolute top-0 left-0 w-full rounded-[24px] overflow-hidden shadow-[0px_8px_32px_0px_rgba(0,0,0,0.12)] cursor-pointer"
+                            style={{
+                              height: '190px',
+                              background: poolItem.id === '1' 
+                                ? `url(https://images.unsplash.com/photo-1542037104857-ffbb0b9155fb?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwyfHxmYW1pbHl8ZW58MXx8fHwxNzc3MDkxNzc0fDA&ixlib=rb-4.1.0&q=80&w=1080) center/cover` 
+                                : poolItem.color || 'linear-gradient(135deg, #0059BD 0%, #1777B1 100%)',
+                            }}
+                          >
+                            <div className="absolute inset-0" style={{ background: poolItem.id === '1' ? 'rgba(0,0,0,0.5)' : 'rgba(255,255,255,0.05)', backdropFilter: poolItem.id === '1' ? 'blur(8px)' : 'none' }} />
+                            <div className="absolute" style={{ width: 180, height: 180, borderRadius: '50%', background: 'rgba(255,255,255,0.05)', top: -60, right: -40 }} />
+                            
+                            <div className="absolute inset-0 flex flex-col justify-between p-6 z-10">
+                              <div>
+                                <p className="text-xs font-semibold mb-1" style={{ color: 'rgba(255,255,255,0.8)', fontFamily: 'Open Sans, sans-serif' }}>
+                                  {poolItem.name} Pool
+                                </p>
+                                <p className="font-bold text-white" style={{ fontSize: '34px', lineHeight: '1.15', fontFamily: 'Open Sans, sans-serif' }}>
+                                  RM {poolItem.currentBalance.toFixed(2)}
+                                </p>
+                                <div className="flex items-center gap-2 mt-1.5">
+                                  <div className="flex -space-x-1.5">
+                                    {poolItem.members.slice(0, 3).map((m, i) => (
+                                      <div key={i} className="w-5 h-5 rounded-full border border-white flex items-center justify-center bg-[#005AFF] text-[9px] text-white font-bold shadow-sm">
+                                        {m.name.charAt(0)}
+                                      </div>
+                                    ))}
+                                  </div>
+                                  <p className="text-xs font-normal" style={{ color: 'rgba(255,255,255,0.9)', fontFamily: 'Open Sans, sans-serif' }}>
+                                    {poolItem.members.length} Contributors
+                                  </p>
+                                </div>
+                              </div>
+                              
+                              <AnimatePresence>
+                                {(isTop && !isStackExpanded) && (
+                                  <Motion.div 
+                                    initial={{ opacity: 0 }} 
+                                    animate={{ opacity: 1 }} 
+                                    exit={{ opacity: 0 }} 
+                                    className="flex gap-3"
+                                  >
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); setActiveTab('scan'); }}
+                                      className="flex-1 flex items-center justify-center gap-2 py-3 rounded-[14px] press-scale"
+                                      style={{ background: 'rgba(255,255,255,0.18)', border: '0.8px solid rgba(255,255,255,0.25)' }}
+                                    >
+                                      <svg className="w-4 h-4" fill="none" viewBox="0 0 20 20">
+                                        <path d={scanPayButtonSvgPaths.pf942a70} stroke="white" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.66667" />
+                                        <path d={scanPayButtonSvgPaths.p3de9ee00} stroke="white" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.66667" />
+                                        <path d={scanPayButtonSvgPaths.pbdf4440} stroke="white" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.66667" />
+                                        <path d={scanPayButtonSvgPaths.p1fb905c0} stroke="white" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.66667" />
+                                      </svg>
+                                      <span className="text-sm font-semibold text-white" style={{ fontFamily: 'Open Sans, sans-serif' }}>Scan & Pay</span>
+                                    </button>
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); }}
+                                      className="flex-1 flex items-center justify-center gap-2 py-3 rounded-[14px] press-scale"
+                                      style={{ background: 'rgba(255,255,255,0.18)', border: '0.8px solid rgba(255,255,255,0.25)' }}
+                                    >
+                                      <Wallet className="w-4 h-4 text-white" />
+                                      <span className="text-sm font-semibold text-white" style={{ fontFamily: 'Open Sans, sans-serif' }}>Top Up</span>
+                                    </button>
+                                  </Motion.div>
+                                )}
+                              </AnimatePresence>
                             </div>
-                            <p className="text-xs" style={{ color: '#6B7280', fontFamily: 'Inter, sans-serif' }}>{p.members.length} member{p.members.length === 1 ? '' : 's'}</p>
+                          </Motion.div>
+                        );
+                      })}
+                    </div>
+
+                    {!isStackExpanded && (
+                      <div className="flex justify-center mt-2 relative z-50">
+                        <button 
+                          onClick={() => setIsStackExpanded(true)}
+                          className="text-[10px] font-bold px-3 py-1 rounded-full press-scale"
+                          style={{ color: '#005AFF', background: '#EEF4FF' }}
+                        >
+                          View All Pools ↓
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* DYNAMIC CONTENT based on active pool */}
+                  <AnimatePresence mode="wait">
+                    {!isStackExpanded && (
+                      <Motion.div
+                        key={activePoolId}
+                        initial={{ opacity: 0, y: 15 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -15 }}
+                        transition={{ duration: 0.3 }}
+                        className="relative z-0"
+                      >
+                        {/* ── THIS MONTH BUDGET ── */}
+                        <div className="px-5 mb-5">
+                          <div className="rounded-[16px] p-4" style={{ background: '#FFFFFF', boxShadow: '0 2px 12px rgba(0,0,0,0.05)' }}>
+                            <div className="flex items-center justify-between mb-3">
+                              <h3 className="text-sm font-bold" style={{ color: '#1A1A1A', fontFamily: 'Inter, sans-serif' }}>{activePool.name} Budget</h3>
+                              <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: '#EEF4FF', color: '#005AFF', fontFamily: 'Inter, sans-serif' }}>This Month</span>
+                            </div>
+                            <div className="space-y-2 mb-3">
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  <div className="w-2 h-2 rounded-full" style={{ background: '#10B981' }} />
+                                  <span className="text-xs" style={{ color: '#6B7280', fontFamily: 'Inter, sans-serif' }}>Collected</span>
+                                </div>
+                                <span className="text-sm font-bold" style={{ color: '#1A1A1A', fontFamily: 'Inter, sans-serif' }}>RM {income}</span>
+                              </div>
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  <div className="w-2 h-2 rounded-full" style={{ background: '#F59E0B' }} />
+                                  <span className="text-xs" style={{ color: '#6B7280', fontFamily: 'Inter, sans-serif' }}>Used</span>
+                                </div>
+                                <span className="text-sm font-bold" style={{ color: '#1A1A1A', fontFamily: 'Inter, sans-serif' }}>RM {used}</span>
+                              </div>
+                            </div>
+                            <div className="mb-3" style={{ height: '6px', background: '#F3F4F6', borderRadius: '3px', overflow: 'hidden' }}>
+                              <div style={{ height: '100%', width: `${percentage}%`, background: percentage > 85 ? '#EF4444' : 'linear-gradient(90deg, #005AFF, #4DA3FF)', borderRadius: '3px', transition: 'width 0.6s ease, background 0.6s ease' }} />
+                            </div>
+                            <div className="flex items-center justify-between pt-2" style={{ borderTop: '0.8px solid #F3F4F6' }}>
+                              <span className="text-xs font-bold" style={{ color: '#1A1A1A', fontFamily: 'Inter, sans-serif' }}>Current Balance</span>
+                              <span className="font-bold" style={{ color: '#005AFF', fontFamily: 'Inter, sans-serif', fontSize: '18px' }}>RM {activePool.currentBalance}</span>
+                            </div>
                           </div>
-                          <div className="text-right">
-                            <p className="text-lg font-bold" style={{ color: '#005AFF', fontFamily: 'Inter, sans-serif' }}>RM {p.currentBalance.toFixed(2)}</p>
-                            {target > 0 && (
-                              <p className="text-xs" style={{ color: '#9CA3AF', fontFamily: 'Inter, sans-serif' }}>of RM {target.toFixed(2)}</p>
+                        </div>
+
+                        {/* ── RECENT TRANSACTIONS ── */}
+                        <div className="px-5 mb-6">
+                          <div className="flex items-center justify-between mb-3">
+                            <h2 className="text-sm font-bold" style={{ color: '#1A1A1A', fontFamily: 'Inter, sans-serif' }}>Recent Transactions</h2>
+                            {/* Time filter button + dropdown */}
+                            <div style={{ position: 'relative' }}>
+                              <button
+                                onClick={() => setShowTimeFilter(o => !o)}
+                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full press-scale"
+                                style={{ background: '#005AFF', transition: 'background 0.15s' }}
+                              >
+                                <span className="text-[10px] font-bold text-white" style={{ fontFamily: 'Inter, sans-serif', maxWidth: 80, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                  {timeFilter === 'All Time' ? 'All' : timeFilter}
+                                </span>
+                                <svg
+                                  width="8" height="5" viewBox="0 0 8 5" fill="none"
+                                  style={{ transform: showTimeFilter ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s', flexShrink: 0 }}
+                                >
+                                  <path d={figmaHomeSvgPaths.p1d8d0700} stroke="white" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.16667" />
+                                </svg>
+                              </button>
+
+                              {/* Dropdown menu */}
+                              {showTimeFilter && (
+                                <>
+                                  {/* Invisible backdrop to close on outside click */}
+                                  <div
+                                    style={{ position: 'fixed', inset: 0, zIndex: 48 }}
+                                    onClick={() => setShowTimeFilter(false)}
+                                  />
+                                  <div
+                                    style={{
+                                      position: 'absolute',
+                                      top: 'calc(100% + 6px)',
+                                      right: 0,
+                                      zIndex: 49,
+                                      background: '#FFFFFF',
+                                      borderRadius: 14,
+                                      boxShadow: '0 8px 32px rgba(0,0,0,0.14), 0 2px 8px rgba(0,0,0,0.08)',
+                                      border: '1px solid rgba(0,90,255,0.1)',
+                                      overflow: 'hidden',
+                                      minWidth: 168,
+                                    }}
+                                  >
+                                    {[
+                                      { label: 'All Time',                  sub: 'All transactions' },
+                                      { label: 'This Month',                sub: 'April 2026' },
+                                      { label: 'Last Month',                sub: 'March 2026' },
+                                      { label: 'Last 90 Days',              sub: 'Jan – Apr 2026' },
+                                    ].map(({ label, sub }, i, arr) => {
+                                      const isActive = timeFilter === label;
+                                      return (
+                                        <button
+                                          key={label}
+                                          onClick={() => { setTimeFilter(label); setShowTimeFilter(false); }}
+                                          style={{
+                                            width: '100%',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'space-between',
+                                            padding: '11px 14px',
+                                            background: isActive ? 'rgba(0,90,255,0.06)' : 'transparent',
+                                            border: 'none',
+                                            borderBottom: i < arr.length - 1 ? '1px solid rgba(0,0,0,0.05)' : 'none',
+                                            cursor: 'pointer',
+                                            textAlign: 'left',
+                                            transition: 'background 0.12s',
+                                          }}
+                                        >
+                                          <div>
+                                            <p style={{ margin: 0, fontSize: 13, fontWeight: isActive ? 700 : 500, color: isActive ? '#005AFF' : '#1A1A1A', fontFamily: 'Inter, sans-serif' }}>
+                                              {label}
+                                            </p>
+                                            <p style={{ margin: '1px 0 0', fontSize: 10, color: '#9CA3AF', fontFamily: 'Inter, sans-serif' }}>
+                                              {sub}
+                                            </p>
+                                          </div>
+                                          {isActive && (
+                                            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" style={{ flexShrink: 0 }}>
+                                              <path d="M2.5 7L5.5 10L11.5 4" stroke="#005AFF" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                                            </svg>
+                                          )}
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                          <div className="space-y-2">
+                            {activeTransactions.length > 0 ? activeTransactions.map((tx) => {
+                              const positive = tx.type === 'contribution';
+                              return (
+                                <div
+                                  key={tx.id}
+                                  onClick={() => setSelectedTransaction(tx)}
+                                  className="flex items-center gap-3 rounded-[12px] px-3 py-3 press-scale cursor-pointer"
+                                  style={{ background: '#FFFFFF', boxShadow: '0 1px 6px rgba(0,0,0,0.04)' }}
+                                >
+                                  <div className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: positive ? '#ECFDF5' : '#FFFBEB' }}>
+                                    {positive ? <Plus className="w-4 h-4 text-emerald-500" /> : <ShoppingCart className="w-4 h-4 text-amber-500" />}
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-xs font-bold truncate" style={{ color: '#1A1A1A', fontFamily: 'Inter, sans-serif' }}>{tx.description || tx.category}</p>
+                                    <div className="flex items-center gap-1.5 mt-0.5">
+                                      <div className="w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold shadow-sm" style={{ background: '#DBE7FF', color: '#005AFF' }}>
+                                        {tx.person?.charAt(0) || 'A'}
+                                      </div>
+                                      <p className="text-[10px]" style={{ color: '#6B7280', fontFamily: 'Inter, sans-serif' }}>{tx.person} • {tx.timestamp ? tx.timestamp.split(',')[0] : 'Today'}</p>
+                                    </div>
+                                  </div>
+                                  <p className="font-bold text-sm flex-shrink-0" style={{ color: positive ? '#10B981' : '#1A1A1A', fontFamily: 'Inter, sans-serif' }}>
+                                    {positive ? '+' : '−'}RM {tx.amount}
+                                  </p>
+                                </div>
+                              );
+                            }) : (
+                              <div className="py-6 text-center rounded-[12px]" style={{ background: '#FFFFFF', border: '1px dashed #E5E7EB' }}>
+                                <p className="text-xs text-gray-500 font-medium">No transactions for this pool.</p>
+                              </div>
                             )}
                           </div>
                         </div>
-                        <div className="progress-bar" style={{ height: '6px', background: '#EEF2F7', borderRadius: '3px', overflow: 'hidden' }}>
-                          <div
-                            className="progress-fill"
-                            style={{
-                              height: '100%',
-                              background: '#FDDC00',
-                              borderRadius: '3px',
-                              width: `${progressPct}%`,
-                              transition: 'width 0.6s ease'
-                            }}
-                          />
-                        </div>
-                      </div>
-                    );
-                  })}
-                  {pools.filter((p) => p.id !== '__loading__').length === 0 && (
-                    <div className="text-center py-6 text-sm" style={{ color: '#6B7280' }}>
-                      You're not in any pool yet.
-                    </div>
-                  )}
+                      </Motion.div>
+                    )}
+                  </AnimatePresence>
                 </div>
-              </div>
-
-              {/* Recent Transactions Section — wired to /users/me/transactions */}
-              <div className="px-5">
-                <div className="flex items-center justify-between mb-3">
-                  <h2 className="text-base font-bold" style={{ color: '#1A1A1A', fontFamily: 'Inter, sans-serif' }}>Recent Transaction</h2>
-                  <button
-                    className="flex items-center gap-2 px-4 py-1.5 rounded-full press-scale"
-                    style={{ background: '#0055D6' }}
-                    onClick={() => setActiveTab('split')}
-                  >
-                    <span className="text-xs font-bold text-white" style={{ fontFamily: 'Inter, sans-serif' }}>All Transactions</span>
-                    <svg width="8" height="5" viewBox="0 0 8 5" fill="none">
-                      <path d={figmaHomeSvgPaths.p1d8d0700} stroke="white" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.16667" />
-                    </svg>
-                  </button>
-                </div>
-
-                <div className="space-y-2.5" style={{ marginBottom: '24px' }}>
-                  {myRecentTransactions.length === 0 && (
-                    <div
-                      className="text-center py-6 text-sm"
-                      style={{
-                        background: '#FFFFFF',
-                        borderRadius: '12px',
-                        boxShadow: '0 2px 8px rgba(0, 0, 0, 0.04)',
-                        color: '#6B7280',
-                        fontFamily: 'Inter, sans-serif',
-                      }}
-                    >
-                      {myTxQ.isLoading ? 'Loading transactions…' : 'No transactions yet.'}
-                    </div>
-                  )}
-                  {myRecentTransactions.map((t) => {
-                    const amount = Number(t.amount);
-                    const isIn = t.direction === 'IN';
-                    const sign = isIn ? '+' : '−';
-                    const color = isIn ? '#0055D6' : '#1A1A1A';
-                    const ts = new Date(t.createdAt);
-                    const now = new Date();
-                    const sameDay =
-                      ts.getFullYear() === now.getFullYear() &&
-                      ts.getMonth() === now.getMonth() &&
-                      ts.getDate() === now.getDate();
-                    const subtitle = sameDay
-                      ? 'Today'
-                      : ts.toLocaleDateString('en-MY', { day: 'numeric', month: 'short' });
-                    return (
-                      <div
-                        key={t.id}
-                        className="press-scale cursor-pointer"
-                        style={{
-                          background: '#FFFFFF',
-                          borderRadius: '12px',
-                          padding: '12px',
-                          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.04)',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          height: '61.987px',
-                        }}
-                      >
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-bold truncate mb-0.5" style={{ color: '#1A1A1A', fontFamily: 'Inter, sans-serif' }}>
-                            {t.description || (isIn ? 'Money in' : 'Money out')}
-                          </p>
-                          <p className="text-xs truncate" style={{ color: '#9CA3AF', fontFamily: 'Inter, sans-serif' }}>{subtitle}</p>
-                        </div>
-                        <div className="text-right flex-shrink-0 ml-2">
-                          <p className="text-base font-bold" style={{ color, fontFamily: 'Inter, sans-serif' }}>
-                            {sign}RM {amount.toFixed(2)}
-                          </p>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
+              );
+            })()
           )}
 
           {/* Pool Tab */}
           {activeTab === 'split' && (
+            <div className="h-full overflow-hidden" style={{ background: 'transparent' }}>
+              <PoolPage
+                pools={pools}
+                transactions={transactions}
+                initialPoolId={viewingPoolId}
+                onCreatePool={() => setShowCreatePool(true)}
+                onContribute={(poolId) => { setSelectedPoolId(poolId); setContributeVotingPowerMode(false); setShowContributeDialog(true); }}
+                onNavigateToScamCheck={() => setActiveTab('scamcheck')}
+                onManageMembers={(poolId) => { setSelectedPoolId(poolId); setShowManageMembers(true); }}
+                onShowReport={(poolId) => { setSelectedPoolId(poolId); setShowReportDialog(true); }}
+                onTopUpVotingPower={(poolId) => { setSelectedPoolId(poolId); setContributeVotingPowerMode(true); setShowContributeDialog(true); }}
+                onReviewFreeze={(poolId) => { setSelectedPoolId(poolId); setShowFreezeSheet(true); }}
+                onSmartCall={(poolId) => { setSelectedPoolId(poolId); setShowSmartCallSheet(true); }}
+              />
+            </div>
+          )}
+
+          {/* Pool Tab OLD - removed */}
+          {false && activeTab === 'split_old' && (
             <div className="h-full overflow-y-auto pb-20" style={{ background: 'transparent' }}>
               {!viewingPoolId ? (
                 // Pool List View
@@ -980,32 +1359,30 @@ export default function App() {
             <ProfilePage />
           )}
 
-          {activeTab === 'layak' && (
-            <LayakPage onBack={() => setActiveTab('home')} />
-          )}
-
+          {/* Scam Check Tab */}
           {activeTab === 'scamcheck' && (
             <ScamCheckPage onBack={() => setActiveTab('home')} />
           )}
         </div>
 
         {/* Bottom Navigation */}
+        {activeTab !== 'scan' && (
         <div
-          className="nav-bar fixed bottom-0 left-0 right-0"
+          className="nav-bar absolute bottom-0 left-0 right-0"
           style={{
             maxWidth: '402px',
             margin: '0 auto',
             background: '#FFFFFF',
             boxShadow: '0 -2px 12px rgba(0, 0, 0, 0.04)',
             padding: '12px 8px',
-            zIndex: 50
+            zIndex: 40
           }}
         >
-          <div className="h-[60px] relative w-full">
+          <div className="flex w-full h-[60px]">
             {/* Home Button */}
             <button
               onClick={() => setActiveTab('home')}
-              className="absolute content-stretch flex flex-col gap-[4px] h-[60px] items-center left-0 p-[8px] top-0 w-[20%] transition-all"
+              className="flex-1 flex flex-col gap-[4px] h-[60px] items-center justify-center p-[8px] transition-all"
               style={{ opacity: activeTab === 'home' ? 1 : 0.6 }}
             >
               <div className="flex-[1_0_0] min-h-px relative w-[24px]">
@@ -1036,7 +1413,7 @@ export default function App() {
             {/* Pool Button */}
             <button
               onClick={() => setActiveTab('split')}
-              className="absolute content-stretch flex flex-col gap-[4px] h-[60px] items-center left-[20%] p-[8px] top-0 w-[20%] transition-all"
+              className="flex-1 flex flex-col gap-[4px] h-[60px] items-center justify-center p-[8px] transition-all"
               style={{ opacity: activeTab === 'split' ? 1 : 0.6 }}
             >
               <div className="flex-[1_0_0] min-h-px relative w-[24px]">
@@ -1078,34 +1455,10 @@ export default function App() {
               </div>
             </button>
 
-            {/* Layak Button */}
-            <button
-              onClick={() => setActiveTab('layak')}
-              className="absolute content-stretch flex flex-col gap-[4px] h-[60px] items-center left-[40%] p-[8px] top-0 w-[20%] transition-all"
-              style={{ opacity: activeTab === 'layak' ? 1 : 0.6 }}
-            >
-              <div className="flex-[1_0_0] min-h-px relative w-[24px]">
-                <div className="bg-clip-padding border-0 border-[transparent] border-solid overflow-clip relative rounded-[inherit] size-full">
-                  <div className="absolute inset-[8.33%_16.67%_8.32%_16.67%]">
-                    <div className="absolute inset-[-5%_-6.25%]">
-                      <svg className="block size-full" fill="none" preserveAspectRatio="none" viewBox="0 0 18 22.0034">
-                        <path d={navSvgPaths.p27979bf0} stroke={activeTab === 'layak' ? '#005AFF' : '#9CA3AF'} strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
-                      </svg>
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <div className="h-[16px] relative shrink-0">
-                <p className="font-medium leading-[16px] not-italic text-[12px] text-center whitespace-nowrap" style={{ color: activeTab === 'layak' ? '#005AFF' : '#9CA3AF', fontWeight: activeTab === 'layak' ? 600 : 500 }}>
-                  Layak
-                </p>
-              </div>
-            </button>
-
             {/* Analytics Button */}
             <button
               onClick={() => setActiveTab('analytics')}
-              className="absolute content-stretch flex flex-col gap-[4px] h-[60px] items-center left-[60%] p-[8px] top-0 w-[20%] transition-all"
+              className="flex-1 flex flex-col gap-[4px] h-[60px] items-center justify-center p-[8px] transition-all"
               style={{ opacity: activeTab === 'analytics' ? 1 : 0.6 }}
             >
               <div className="flex-[1_0_0] min-h-px relative w-[24px]">
@@ -1136,7 +1489,7 @@ export default function App() {
             {/* Profile Button */}
             <button
               onClick={() => setActiveTab('profile')}
-              className="absolute content-stretch flex flex-col gap-[4px] h-[60px] items-center left-[80%] p-[8px] top-0 w-[20%] transition-all"
+              className="flex-1 flex flex-col gap-[4px] h-[60px] items-center justify-center p-[8px] transition-all"
               style={{ opacity: activeTab === 'profile' ? 1 : 0.6 }}
             >
               <div className="flex-[1_0_0] min-h-px relative w-[24px]">
@@ -1165,6 +1518,7 @@ export default function App() {
             </button>
           </div>
         </div>
+        )}
       </div>
 
       <CreatePoolDialog
@@ -1185,12 +1539,6 @@ export default function App() {
         transaction={selectedTransaction}
       />
 
-      <PayWithPoolDialog
-        open={showPayWithPool}
-        onOpenChange={setShowPayWithPool}
-        pools={pools}
-      />
-
       <ManageMembersDialog
         open={showManageMembers}
         onOpenChange={(open) => {
@@ -1205,9 +1553,10 @@ export default function App() {
 
       <ContributeToPoolDialog
         open={showContributeDialog}
+        votingPowerMode={contributeVotingPowerMode}
         onOpenChange={(open) => {
           setShowContributeDialog(open);
-          if (!open) setSelectedPoolId(null);
+          if (!open) { setSelectedPoolId(null); setContributeVotingPowerMode(false); }
         }}
         poolName={selectedPoolId ? pools.find(p => p.id === selectedPoolId)?.name || '' : pool.name}
         currentBalance={selectedPoolId ? pools.find(p => p.id === selectedPoolId)?.currentBalance || 0 : pool.currentBalance}
@@ -1229,6 +1578,74 @@ export default function App() {
         transactions={selectedPoolId ? transactions.filter(t => t.poolId === selectedPoolId) : transactions}
         createdDate="13 Apr 2026"
       />
+
+      <AnimatePresence>
+        {activeTab === 'scan' && (
+          <ScanPage onBack={() => setActiveTab('home')} />
+        )}
+      </AnimatePresence>
+
+      {/* ── FREEZE POOL SHEET (full-frame overlay, covers nav bar) ── */}
+      <FreezePoolSheet
+        open={showFreezeSheet}
+        poolName={selectedPoolId ? pools.find(p => p.id === selectedPoolId)?.name || 'Pool' : 'Pool'}
+        onClose={() => { setShowFreezeSheet(false); setSelectedPoolId(null); }}
+        onFreezeSuccess={() => {
+          setShowFreezeSheet(false);
+          setSelectedPoolId(null);
+          showToast('🔒 Pool Isolated. Members notified.');
+        }}
+      />
+
+      {/* ── SMART CALL SHEET (full-frame overlay, covers nav bar) ── */}
+      <SmartCallSheet
+        open={showSmartCallSheet}
+        poolName={selectedPoolId ? pools.find(p => p.id === selectedPoolId)?.name || 'Pool' : 'Pool'}
+        members={(selectedPoolId ? pools.find(p => p.id === selectedPoolId)?.members || [] : pool.members) as any}
+        onClose={() => { setShowSmartCallSheet(false); setSelectedPoolId(null); }}
+        onSendSuccess={() => {
+          setShowSmartCallSheet(false);
+          setSelectedPoolId(null);
+          showToast('📱 Smart Call sent! Members will be notified shortly.');
+        }}
+      />
+
+      {/* ── IN-APP TOAST (highest z-index, inside phone frame) ── */}
+      {appToast && (
+        <div
+          style={{
+            position: 'absolute',
+            top: 52,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 300,
+            background: 'linear-gradient(135deg, #1A1A2E, #16213E)',
+            color: '#fff',
+            padding: '12px 18px',
+            borderRadius: 14,
+            boxShadow: '0 8px 32px rgba(0,0,0,0.35)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            minWidth: 220,
+            maxWidth: 340,
+            animation: 'toastSlideDown 0.3s cubic-bezier(0.32,0.72,0,1) both',
+            border: '1px solid rgba(255,255,255,0.12)',
+          }}
+        >
+          <span style={{ fontSize: 18, flexShrink: 0 }}>{appToast.split(' ')[0]}</span>
+          <p style={{ fontSize: 13, fontWeight: 600, fontFamily: 'Inter, sans-serif', margin: 0, lineHeight: '18px' }}>
+            {appToast.slice(appToast.indexOf(' ') + 1)}
+          </p>
+        </div>
+      )}
+
+      <style>{`
+        @keyframes toastSlideDown {
+          from { opacity: 0; transform: translateX(-50%) translateY(-16px); }
+          to { opacity: 1; transform: translateX(-50%) translateY(0); }
+        }
+      `}</style>
     </div>
   );
 }

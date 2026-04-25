@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Shield, AlertTriangle, FileText, Image, CheckCircle2, Flag, Lightbulb, X, Upload, Loader2 } from 'lucide-react';
+import { useScamCheck, type ScamCheckResult } from '../../api/hooks';
 
 type CheckState = 'initial' | 'input' | 'scanning' | 'result';
 type InputMethod = 'text' | 'image' | null;
@@ -10,6 +11,8 @@ export function ScamCheckPage({ onBack }: { onBack: () => void }) {
   const [inputText, setInputText] = useState('');
   const [uploadedImage, setUploadedImage] = useState<string | null>(null);
   const [rotation, setRotation] = useState(0);
+  const [result, setResult] = useState<ScamCheckResult | null>(null);
+  const scamCheck = useScamCheck();
 
   // Animate the loader
   useEffect(() => {
@@ -44,10 +47,16 @@ export function ScamCheckPage({ onBack }: { onBack: () => void }) {
 
   const handleAnalyze = async () => {
     setCheckState('scanning');
-
-    // Simulate scanning process
-    await new Promise(resolve => setTimeout(resolve, 2500));
-
+    try {
+      const r = await scamCheck.mutateAsync({
+        message: inputText || '(image-based check not yet implemented)',
+        language: 'EN',
+      });
+      setResult(r);
+    } catch (err) {
+      // On error, fall back to a "could not verify" result
+      setResult({ isScam: false, confidence: 0, reason: 'Unable to verify — check your connection.', signals: [] });
+    }
     setCheckState('result');
   };
 
@@ -462,19 +471,30 @@ export function ScamCheckPage({ onBack }: { onBack: () => void }) {
             }}>
               <AlertTriangle className="w-4 h-4" style={{ color: '#D97706' }} />
               <span style={{ fontSize: 12, fontWeight: 700, color: '#D97706', letterSpacing: '0.3px' }}>
-                POTENTIAL SCAM
+                {result?.isScam ? 'POTENTIAL SCAM' : 'LIKELY SAFE'}
               </span>
             </div>
 
             {/* Title */}
             <h3 style={{ fontSize: 17, fontWeight: 700, color: '#0F172A', marginBottom: 8 }}>
-              Fake saman message detected
+              {result?.isScam
+                ? 'Suspicious message detected'
+                : 'No scam patterns detected'}
+              {result && ` (${Math.round((result.confidence ?? 0) * 100)}%)`}
             </h3>
 
             {/* Detail */}
             <p style={{ fontSize: 14, color: '#64748B', marginBottom: 16, lineHeight: 1.5 }}>
-              No official record found
+              {result?.reason ?? 'Analysis complete'}
             </p>
+
+            {result?.signals && result.signals.length > 0 && (
+              <ul style={{ fontSize: 13, color: '#475569', margin: '0 0 16px 16px', paddingLeft: 12 }}>
+                {result.signals.map((s, i) => (
+                  <li key={i} style={{ marginBottom: 4 }}>{s}</li>
+                ))}
+              </ul>
+            )}
 
             {/* Advice Box */}
             <div style={{

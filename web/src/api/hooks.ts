@@ -676,8 +676,17 @@ export function useSendMainAgentMessage() {
   return useMutation({
     mutationFn: (vars: { message: string }) =>
       api<MainAgentReply>('/agent/message', { method: 'POST', body: vars }),
-    onSuccess: () => {
+    onSuccess: (reply) => {
       qc.invalidateQueries({ queryKey: ['main-agent', 'conversation'] });
+      // Tool calls (create_pool, contribute, vote, etc.) mutate server state
+      // that's read elsewhere in the app. Refresh those caches so the user
+      // sees the result immediately on Home / Pool / Analytics.
+      const tools = (reply?.toolResults ?? []) as Array<{ ok?: boolean; tool?: string }>;
+      if (tools.some((t) => t?.ok)) {
+        qc.invalidateQueries({ queryKey: ['pools'] });
+        qc.invalidateQueries({ queryKey: ['me'] });
+        qc.invalidateQueries({ queryKey: ['contacts'] });
+      }
     },
   });
 }

@@ -18,3 +18,8 @@ email-validator>=2.2
 # Pool Agent AI
 anthropic>=0.40
 httpx>=0.27
+
+# Local ML inference (DistilBERT classifier + Isolation-Forest anomaly)
+onnxruntime>=1.16
+tokenizers>=0.20
+joblib>=1.3

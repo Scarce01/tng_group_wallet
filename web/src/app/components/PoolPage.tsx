@@ -6,6 +6,8 @@ import {
 } from 'lucide-react';
 import { PoolScanPayDialog } from './PoolScanPayDialog';
 import { AiAdvisorDialog } from './AiAdvisorDialog';
+import { AiAdvisorIcon } from './AiAdvisorIcon';
+import { useAgentBrief } from '../../api/hooks';
 
 export interface PoolMember {
   id: string;
@@ -95,6 +97,23 @@ export function PoolPage({
   const [showAllCards, setShowAllCards] = useState(false);
   const [showScanPay, setShowScanPay] = useState(false);
   const [showAiAdvisor, setShowAiAdvisor] = useState(false);
+  const [adviceDismissed, setAdviceDismissed] = useState(false);
+
+  // Active pool reference for the proactive advice card. Computed inline so
+  // it's available before the activePool variable proper (further down).
+  const activePoolForAdvice = pools[activeIndex];
+  const briefQuery = useAgentBrief(activePoolForAdvice?.id);
+  // Reset dismiss when switching pools
+  useEffect(() => {
+    setAdviceDismissed(false);
+  }, [activePoolForAdvice?.id]);
+  const adviceText = (() => {
+    const raw = briefQuery.data?.brief ?? briefQuery.data?.text ?? briefQuery.data?.answer;
+    if (!raw) return null;
+    // First sentence only — keep the card short
+    const first = raw.split(/(?<=[.!?])\s+/)[0]?.trim();
+    return first && first.length > 0 ? first : null;
+  })();
   const touchStartX = useRef<number | null>(null);
   const isAnimating = useRef(false);
 
@@ -708,14 +727,71 @@ export function PoolPage({
                 animation: alertBlink 2s infinite;
                 z-index: 2;
               }
+              .ai-advice-card {
+                position: absolute;
+                bottom: 110px;
+                right: 90px;
+                z-index: 41;
+                max-width: 220px;
+                padding: 10px 14px;
+                background: #005AFF;
+                color: #ffffff;
+                border-radius: 12px;
+                font-size: 12px;
+                line-height: 1.45;
+                font-weight: 500;
+                font-family: Inter, sans-serif;
+                box-shadow: 0 6px 20px rgba(0, 90, 255, 0.35);
+                cursor: pointer;
+                display: flex;
+                flex-direction: column;
+                gap: 6px;
+              }
+              .ai-advice-card-dismiss {
+                position: absolute;
+                top: -6px;
+                right: -6px;
+                width: 20px;
+                height: 20px;
+                border-radius: 50%;
+                background: #1f2937;
+                color: #ffffff;
+                border: none;
+                cursor: pointer;
+                font-size: 12px;
+                line-height: 1;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+              }
             `}
           </style>
+          {adviceText && !adviceDismissed && !showAiAdvisor && (
+            <div
+              className="ai-advice-card"
+              onClick={() => setShowAiAdvisor(true)}
+              role="button"
+              aria-label="Open AI advisor"
+            >
+              {adviceText}
+              <button
+                className="ai-advice-card-dismiss"
+                onClick={(e) => { e.stopPropagation(); setAdviceDismissed(true); }}
+                aria-label="Dismiss advice"
+              >
+                ×
+              </button>
+            </div>
+          )}
           <div
             onClick={() => setShowAiAdvisor(true)}
             className="ai-character-container press-scale"
           >
             <div style={{ position: 'relative' }}>
-              <div className="ai-character">🤖</div>
+              <div className="ai-character" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <AiAdvisorIcon size={56} />
+              </div>
               <div className="ai-alert-dot" />
             </div>
             <div className="ai-shadow" />

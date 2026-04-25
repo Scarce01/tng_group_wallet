@@ -14,9 +14,9 @@ from typing import Any, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..enums import AgentMessageType, ContributionStatus
-from ..models import Contribution
-from sqlalchemy import select, func
+from ..enums import AgentMessageType, ContributionStatus, TransactionType
+from ..models import Contribution, Transaction
+from sqlalchemy import select, func, desc
 from . import router
 from .external.context import format_external_for_prompt, refresh_context_if_needed
 from .memory import (
@@ -24,6 +24,12 @@ from .memory import (
     get_pool_memory,
     record_agent_message,
     upsert_pool_memory,
+)
+from .ml import (
+    anomaly_status,
+    classifier_status,
+    classify_transaction,
+    score_transactions,
 )
 from .prompts import system_for
 from .state import pool_financial_state
@@ -299,19 +305,173 @@ Return JSON only."""
 
 # ---------------- Freeform ask ----------------
 
+# ---------------- Local ML signals (ONNX classifier + anomaly detector) ----
+
+async def _recent_pool_transactions(session: AsyncSession, pool_id: str, limit: int = 100) -> list[Transaction]:
+    """Newest-first list of transactions tied to this pool. Used as input
+    for both the classifier (label each one) and the anomaly detector
+    (compute anomaly scores on the time-ordered sequence)."""
+    rows = (await session.execute(
+        select(Transaction)
+        .where(Transaction.poolId == pool_id)
+        .order_by(desc(Transaction.createdAt))
+        .limit(limit)
+    )).scalars().all()
+    return list(rows)
+
+
+def _tx_to_anomaly_input(tx: Transaction) -> dict[str, Any]:
+    """Map a Transaction row to the dict shape expected by ml.anomaly.score_transactions."""
+    desc_str = tx.description or ""
+    # cheap merchant extraction: text up to the first dash, comma, or @ symbol
+    merchant = re.split(r"[-,@]", desc_str, maxsplit=1)[0].strip()
+    return {
+        "id": tx.id,
+        "amount": float(tx.amount or 0),
+        "created_at": tx.createdAt,
+        "category": (tx.metadata_ or {}).get("category", "other") if isinstance(tx.metadata_, dict) else "other",
+        "recipient_id": merchant or "unknown",
+        "user_id": tx.userId,
+        "description": desc_str,
+        "merchant": merchant,
+    }
+
+
+async def gather_ml_signals(session: AsyncSession, pool_id: str) -> dict[str, Any]:
+    """Run the local ONNX models over the pool's recent transactions and
+    return a compact digest the LLM can paste into its reasoning context.
+
+    Cheap to call: bounded to 100 most-recent tx, both models are CPU-only
+    and complete in well under 100 ms even on commodity hardware.
+
+    Returns:
+        {
+          "available": bool,                   # at least one model loaded
+          "classifier": {loaded, sample[]},     # labels for top spends
+          "anomaly":    {loaded, anomalies[]}, # tx flagged as outliers
+        }
+    """
+    txs = await _recent_pool_transactions(session, pool_id, limit=100)
+    if not txs:
+        return {"available": False, "reason": "no transactions"}
+
+    cls_status = classifier_status()
+    ano_status = anomaly_status()
+    out: dict[str, Any] = {"available": cls_status["loaded"] or ano_status["loaded"]}
+
+    # ── Classifier: tag the 5 largest spends so the LLM has category context
+    if cls_status["loaded"]:
+        spends = [t for t in txs if t.type == TransactionType.SPEND][:5]
+        labelled = []
+        for t in spends:
+            inp = _tx_to_anomaly_input(t)
+            r = classify_transaction(
+                description=inp["description"],
+                merchant_name=inp["merchant"],
+                amount=inp["amount"],
+                hour=t.createdAt.hour if t.createdAt else 12,
+            )
+            if r:
+                labelled.append({
+                    "txId": t.id,
+                    "description": inp["description"][:60],
+                    "amount": inp["amount"],
+                    "predictedCategory": r["label"],
+                    "confidence": round(r["confidence"], 3),
+                })
+        out["classifier"] = {"loaded": True, "sample": labelled}
+    else:
+        out["classifier"] = {"loaded": False, "reason": cls_status.get("loadError")}
+
+    # ── Anomaly: flag outliers in the (chronological) tx stream
+    if ano_status["loaded"]:
+        # Anomaly model needs chronological order
+        chrono = sorted(txs, key=lambda t: t.createdAt)
+        rows = [_tx_to_anomaly_input(t) for t in chrono]
+        # rough budget for normalization: pool target if known else sum of all
+        state = await pool_financial_state(session, pool_id)
+        budget = float(state.get("targetAmount") or sum(r["amount"] for r in rows) or 5000.0)
+        scored = score_transactions(rows, pool_budget=budget)
+        anomalies = [s for s in scored if s.get("isAnomaly")][:5]
+        out["anomaly"] = {
+            "loaded": True,
+            "scanned": len(scored),
+            "anomalies": [
+                {
+                    "txId": a["tx_id"],
+                    "amount": a["amount"],
+                    "score": round(a["score"], 4),
+                    "category": a["category"],
+                    "createdAt": a["createdAt"],
+                }
+                for a in anomalies
+            ],
+        }
+    else:
+        out["anomaly"] = {"loaded": False, "reason": ano_status.get("loadError")}
+
+    return out
+
+
+def _format_ml_for_prompt(signals: dict[str, Any]) -> str:
+    """Render ML signals as a compact human-readable block for the LLM."""
+    if not signals.get("available"):
+        return "Local ML models: not loaded (skipping signals)."
+
+    parts = ["Local ML signals (computed live from this pool's transactions):"]
+    cls = signals.get("classifier", {})
+    if cls.get("loaded") and cls.get("sample"):
+        parts.append("  Top spends classified by DistilBERT:")
+        for s in cls["sample"]:
+            parts.append(
+                f"    - RM {s['amount']:.2f} '{s['description']}' → {s['predictedCategory']} ({s['confidence']:.0%})"
+            )
+    ano = signals.get("anomaly", {})
+    if ano.get("loaded"):
+        n = len(ano.get("anomalies", []))
+        if n == 0:
+            parts.append(f"  Anomaly model scanned {ano.get('scanned', 0)} txs — none flagged as outliers.")
+        else:
+            parts.append(f"  Anomaly model flagged {n} of {ano.get('scanned', 0)} txs:")
+            for a in ano["anomalies"]:
+                parts.append(
+                    f"    - RM {a['amount']:.2f} on {a['createdAt']} (score={a['score']}, cat={a['category']})"
+                )
+    return "\n".join(parts)
+
+
+# ---------------- Q&A ----------------
+
 async def ask(session: AsyncSession, *, pool_id: str, question: str) -> dict[str, Any]:
     state = await pool_financial_state(session, pool_id)
     mem = await get_pool_memory(session, pool_id)
     sys = system_for(state.get("type", ""))
     obs_str = "; ".join((o.get("note", "") for o in (mem.observations[-5:] if mem else [])))
+
+    # Run local ONNX models over the pool's recent transactions; failures
+    # degrade gracefully (render as "models not loaded" in the prompt block).
+    ml_signals = await gather_ml_signals(session, pool_id)
+    ml_block = _format_ml_for_prompt(ml_signals)
+
     prompt = f"""Pool snapshot:
 {json.dumps({k: state.get(k) for k in ('name','type','currentBalance','targetAmount','totalSpent','spendCount','memberCount','daysRemaining','pace','spendByCategory')}, default=str)}
 
 Recent agent observations: {obs_str or '(none)'}
 
-User question: {question}"""
+{ml_block}
+
+User question: {question}
+
+Reply concisely (3-5 sentences). When the user asks about unusual spending,
+anomalies, or categories, base your answer on the Local ML signals above."""
+
     text, meta = await router.query(prompt, task_type=None, system=sys)
-    return {"text": text, "metadata": meta}
+
+    # Note: not persisting user/assistant turns to AgentMessage — that table's
+    # type enum is domain-event shaped (SPEND_EVALUATION, BUDGET_WARNING, ...)
+    # not chat turns. Frontend keeps the conversation in local state.
+
+    return {"answer": text, "text": text, "metadata": meta, "mlSignals": ml_signals}
 
 
 # ---------------- Helpers ----------------

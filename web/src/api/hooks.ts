@@ -396,9 +396,13 @@ export interface AgentMessage {
 }
 
 export interface AgentAskResult {
-  answer: string;
+  // Backend returns `answer` (new) or `text` (older). Either may be present.
+  answer?: string;
+  text?: string;
   messageId?: string;
   reasoning?: string;
+  mlSignals?: unknown;
+  metadata?: unknown;
 }
 
 export function useAgentMessages(poolId: string | undefined, limit = 50) {
@@ -426,9 +430,23 @@ export function useAgentAsk(poolId: string | undefined) {
   });
 }
 
+/**
+ * Brief is a POST that the agent treats as idempotent for read-after-write
+ * purposes (re-running just refreshes the cached daily brief). Wrapping it
+ * as a query lets PoolPage auto-fire it once on mount to populate the
+ * proactive advice bubble.
+ */
 export function useAgentBrief(poolId: string | undefined) {
-  return useMutation({
-    mutationFn: () => api<{ brief: string }>(`/pools/${poolId}/agent/brief`, { method: "POST" }),
+  return useQuery({
+    queryKey: ["pool", poolId, "agent", "brief"],
+    queryFn: () =>
+      api<{ brief?: string; text?: string; answer?: string }>(
+        `/pools/${poolId}/agent/brief`,
+        { method: "POST" },
+      ),
+    enabled: !!poolId && !!tokens.access,
+    staleTime: 5 * 60_000, // 5 min — don't re-call on every tab switch
+    retry: 0,
   });
 }
 

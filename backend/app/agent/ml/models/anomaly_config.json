@@ -1,0 +1,20 @@
+{
+  "feature_names": [
+    "amount_vs_pool_avg",
+    "amount_vs_user_avg",
+    "amount_vs_category_avg",
+    "hour_normalized",
+    "day_of_week_normalized",
+    "is_weekend",
+    "hours_since_last_tx",
+    "recipient_frequency",
+    "is_new_recipient",
+    "daily_cumulative_pct",
+    "total_spent_pct",
+    "log_amount",
+    "tx_velocity_2h"
+  ],
+  "threshold": 0.535890554585186,
+  "contamination": 0.08233413269384493,
+  "n_estimators": 200
+}

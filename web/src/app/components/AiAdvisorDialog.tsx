@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { X, Sparkles, Send, Zap, ShieldAlert, TrendingDown, Loader2 } from 'lucide-react';
+import { X, Send, Zap, ShieldAlert, TrendingDown, Loader2 } from 'lucide-react';
 import { useAgentMessages, useAgentAsk } from '../../api/hooks';
+import { AiAdvisorIcon } from './AiAdvisorIcon';
 
 interface AiAdvisorDialogProps {
   open: boolean;
@@ -79,11 +80,10 @@ export function AiAdvisorDialog({
     setInput('');
     try {
       const res = await ask.mutateAsync({ question: trimmed });
+      const reply = res.answer ?? res.text ?? '(no response — backend returned empty body)';
       setChat((c) =>
         c.map((line) =>
-          line.id === pendingId
-            ? { ...line, text: res.answer || '(no response)', pending: false }
-            : line,
+          line.id === pendingId ? { ...line, text: reply, pending: false } : line,
         ),
       );
     } catch (err) {
@@ -113,8 +113,8 @@ export function AiAdvisorDialog({
         {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 24px 14px 24px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <div style={{ width: 34, height: 34, borderRadius: '50%', background: 'linear-gradient(135deg, #EFF6FF, #DBEAFE)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 8px rgba(0,90,255,0.15)' }}>
-              <Sparkles size={16} color="#005AFF" />
+            <div style={{ width: 38, height: 38, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <AiAdvisorIcon size={38} />
             </div>
             <div>
               <p style={{ fontFamily: 'Inter, sans-serif', fontWeight: 700, fontSize: '17px', color: '#1a1a1a', margin: 0 }}>

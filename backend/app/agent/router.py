@@ -10,11 +10,20 @@ The caller passes a `task_type` string. If none is given, llama3.2 is used.
 
 Sanitization: Claude calls automatically run through the sanitizer. Ollama
 calls do NOT — they see raw RM amounts and member names, which is safe
-because Ollama runs on the user's machine."""
+because Ollama runs on the user's machine.
+
+Fallback: if the local Ollama daemon is unreachable, the router transparently
+re-routes the call to Claude (sanitized) so Main Agent and Pool Agent keep
+working when llama3.2 is offline."""
 import asyncio
+import json as _json
 import logging
+import os
+import re
 import time
 from typing import Iterable, Literal, Optional
+
+import httpx
 
 from .claude_client import query_claude_sanitized
 from .ollama_client import (
@@ -73,6 +82,7 @@ async def query(
     start = time.monotonic()
 
     response: str
+    fallback_used = False
     if chosen == "claude":
         # Claude SDK is sync-only; offload to a thread.
         response = await asyncio.to_thread(
@@ -86,15 +96,34 @@ async def query(
         model_id = "claude-sonnet-4-5"
     else:
         model_id = REASONING_MODEL if chosen == "deepseek-r1" else DEFAULT_MODEL
-        if json_mode:
-            response = await query_ollama_json(
-                prompt, model=model_id, system=system, temperature=temperature
+        try:
+            if json_mode:
+                response = await query_ollama_json(
+                    prompt, model=model_id, system=system, temperature=temperature
+                )
+                response = response if isinstance(response, str) else _to_json(response)
+            else:
+                response = await query_ollama(
+                    prompt, model=model_id, system=system, temperature=temperature
+                )
+        except Exception as e:
+            if not _is_ollama_unreachable(e) or not _claude_fallback_enabled():
+                raise
+            log.warning(
+                "agent.query ollama unreachable (model=%s task=%s): %s — falling back to Claude",
+                model_id, task_type, e,
             )
-            response = response if isinstance(response, str) else _to_json(response)
-        else:
-            response = await query_ollama(
-                prompt, model=model_id, system=system, temperature=temperature
+            response = await _claude_fallback(
+                prompt,
+                system=system,
+                json_mode=json_mode,
+                member_names=member_names,
+                temperature=temperature,
+                max_tokens=max_tokens,
             )
+            model_id = "claude-sonnet-4-5"
+            chosen = "claude"
+            fallback_used = True
 
     latency_ms = int((time.monotonic() - start) * 1000)
     meta = {
@@ -103,8 +132,73 @@ async def query(
         "task_type": task_type,
         "latency_ms": latency_ms,
     }
-    log.info("agent.query tier=%s model=%s task=%s latency=%dms", chosen, model_id, task_type, latency_ms)
+    if fallback_used:
+        meta["fallback_from"] = "ollama"
+    log.info(
+        "agent.query tier=%s model=%s task=%s latency=%dms%s",
+        chosen, model_id, task_type, latency_ms,
+        " fallback=ollama→claude" if fallback_used else "",
+    )
     return response, meta
+
+
+def _claude_fallback_enabled() -> bool:
+    if os.getenv("AGENT_CLAUDE_FALLBACK", "1") == "0":
+        return False
+    return bool(os.getenv("ANTHROPIC_API_KEY"))
+
+
+def _is_ollama_unreachable(err: Exception) -> bool:
+    """True if the error is Ollama being down/missing — connection refused,
+    DNS failure, timeout. We do NOT fall back on real model errors (e.g.
+    bad prompt) since those would also fail on Claude."""
+    if isinstance(err, (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout, httpx.NetworkError)):
+        return True
+    if isinstance(err, httpx.HTTPStatusError):
+        # 404 model-not-pulled is a config issue; fall back so the user still gets a reply.
+        return err.response.status_code in (404, 500, 502, 503, 504)
+    msg = str(err).lower()
+    return any(s in msg for s in ("connection refused", "name or service", "ollama"))
+
+
+async def _claude_fallback(
+    prompt: str,
+    *,
+    system: Optional[str],
+    json_mode: bool,
+    member_names: Iterable[str],
+    temperature: float,
+    max_tokens: int,
+) -> str:
+    sys_prompt = system
+    if json_mode:
+        json_note = (
+            "Respond ONLY with a single valid JSON object. "
+            "No prose, no markdown fences, no commentary before or after."
+        )
+        sys_prompt = f"{system}\n\n{json_note}" if system else json_note
+
+    text = await asyncio.to_thread(
+        query_claude_sanitized,
+        prompt,
+        member_names=member_names,
+        system=sys_prompt,
+        max_tokens=max_tokens,
+        temperature=temperature,
+    )
+    if json_mode:
+        # Claude sometimes wraps JSON in ```json fences or adds a sentence.
+        # Strip both, then validate; on failure return "{}" like ollama_json does.
+        cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip(), flags=re.MULTILINE)
+        m = re.search(r"\{[\s\S]*\}", cleaned)
+        candidate = m.group(0) if m else cleaned
+        try:
+            _json.loads(candidate)
+            return candidate
+        except Exception:
+            log.warning("claude fallback returned non-JSON: %r", text[:200])
+            return "{}"
+    return text
 
 
 def _to_json(d) -> str:

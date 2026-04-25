@@ -74,21 +74,24 @@ export function ContributeToPoolDialog({
 }: ContributeToPoolDialogProps) {
   const [step, setStep] = useState<Step>('amount');
   const [amountStr, setAmountStr] = useState<string>(recommendedContribution.toString());
+  const [committedNewBalance, setCommittedNewBalance] = useState<number | null>(null);
   const amount = parseFloat(amountStr) || 0;
 
   const handleClose = () => {
     setStep('amount');
+    setCommittedNewBalance(null);
     onOpenChange(false);
   };
 
   const handleConfirm = () => {
+    setCommittedNewBalance(currentBalance + amount);
     onContribute(amount);
     setStep('success');
   };
 
   if (!open) return null;
 
-  const newBalance = currentBalance + amount;
+  const newBalance = committedNewBalance ?? (currentBalance + amount);
 
   // Simple logic to show a dynamic progress text based on amount
   const getPowerText = (val: number) => {

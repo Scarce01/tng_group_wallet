@@ -3,6 +3,7 @@
 Window-counter style; concurrency-safe under asyncio (single-loop). Adds
 RateLimit-* headers like the standardHeaders option in express-rate-limit.
 """
+import os
 import time
 from collections import defaultdict
 from typing import Callable
@@ -10,6 +11,8 @@ from typing import Callable
 from fastapi import Request, Response
 
 from .errors import AppError
+
+_RATE_LIMIT_DISABLED = os.getenv("NODE_ENV", "development") != "production"
 
 
 def _client_key(req: Request) -> str:
@@ -26,6 +29,11 @@ class RateLimiter:
         self._buckets: dict[str, tuple[int, float]] = {}
 
     def check(self, req: Request, resp: Response) -> None:
+        if _RATE_LIMIT_DISABLED:
+            resp.headers["RateLimit-Limit"] = str(self.max)
+            resp.headers["RateLimit-Remaining"] = str(self.max)
+            resp.headers["RateLimit-Reset"] = str(self.window)
+            return
         key = _client_key(req)
         now = time.time()
         count, reset = self._buckets.get(key, (0, now + self.window))

@@ -778,14 +778,14 @@ export default function App() {
                                   <div className="w-2 h-2 rounded-full" style={{ background: '#10B981' }} />
                                   <span className="text-xs" style={{ color: '#6B7280', fontFamily: 'Inter, sans-serif' }}>Collected</span>
                                 </div>
-                                <span className="text-sm font-bold" style={{ color: '#1A1A1A', fontFamily: 'Inter, sans-serif' }}>RM {income}</span>
+                                <span className="text-sm font-bold" style={{ color: '#1A1A1A', fontFamily: 'Inter, sans-serif' }}>RM {income.toFixed(2)}</span>
                               </div>
                               <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-2">
                                   <div className="w-2 h-2 rounded-full" style={{ background: '#F59E0B' }} />
                                   <span className="text-xs" style={{ color: '#6B7280', fontFamily: 'Inter, sans-serif' }}>Used</span>
                                 </div>
-                                <span className="text-sm font-bold" style={{ color: '#1A1A1A', fontFamily: 'Inter, sans-serif' }}>RM {used}</span>
+                                <span className="text-sm font-bold" style={{ color: '#1A1A1A', fontFamily: 'Inter, sans-serif' }}>RM {used.toFixed(2)}</span>
                               </div>
                             </div>
                             <div className="mb-3" style={{ height: '6px', background: '#F3F4F6', borderRadius: '3px', overflow: 'hidden' }}>
@@ -793,7 +793,7 @@ export default function App() {
                             </div>
                             <div className="flex items-center justify-between pt-2" style={{ borderTop: '0.8px solid #F3F4F6' }}>
                               <span className="text-xs font-bold" style={{ color: '#1A1A1A', fontFamily: 'Inter, sans-serif' }}>Current Balance</span>
-                              <span className="font-bold" style={{ color: '#005AFF', fontFamily: 'Inter, sans-serif', fontSize: '18px' }}>RM {activePool.currentBalance}</span>
+                              <span className="font-bold" style={{ color: '#005AFF', fontFamily: 'Inter, sans-serif', fontSize: '18px' }}>RM {activePool.currentBalance.toFixed(2)}</span>
                             </div>
                           </div>
                         </div>

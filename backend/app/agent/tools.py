@@ -13,6 +13,7 @@ from decimal import Decimal
 from typing import Any, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from ..enums import AgentMessageType, ContributionStatus, TransactionType
 from ..models import Contribution, Transaction
@@ -314,6 +315,7 @@ async def _recent_pool_transactions(session: AsyncSession, pool_id: str, limit: 
     (compute anomaly scores on the time-ordered sequence)."""
     rows = (await session.execute(
         select(Transaction)
+        .options(selectinload(Transaction.user))
         .where(Transaction.poolId == pool_id)
         .order_by(desc(Transaction.createdAt))
         .limit(limit)
@@ -472,10 +474,49 @@ def _format_ml_for_prompt(signals: dict[str, Any]) -> str:
 
 # ---------------- Q&A ----------------
 
+_POOL_AGENT_WIDGET_GUIDE = """
+WIDGET PROTOCOL — when your answer involves numbers the user would benefit
+from seeing visually, render a chart widget INSTEAD OF spelling the numbers
+out as prose. The whole reply MUST be a single JSON object of the form:
+
+  {"message": "<short 1-2 sentence narration>", "widgets": [<one widget>]}
+
+If no chart is helpful, return widgets: [].
+
+Widget catalog (pick one per reply):
+
+  Bar chart — for "spending breakdown", "spend by category", "where did money go":
+    {"type":"bar_chart","title":"Spend by category","unit":"RM",
+     "data":[{"label":"Food","value":420.50},{"label":"Petrol","value":180}, ...]}
+    Sort data descending by value. Cap at top 6 categories.
+
+  Line chart — for "daily spending", "spend over time", "yesterday vs today":
+    {"type":"line_chart","title":"Daily spend (last 7 days)","unit":"RM",
+     "data":[{"label":"Mon","value":120},{"label":"Tue","value":80}, ...]}
+
+  Transaction table — for "show recent transactions", "list yesterday's spends":
+    {"type":"transaction_table","title":"Yesterday's spending",
+     "items":[{"description":"Mamak supper","amount":24.17,"direction":"OUT","person":"Ahmad","date":"2026-04-25T22:14:00Z"}, ...]}
+
+  Metric grid — for "summary", "where do we stand", "key numbers":
+    {"type":"metric_grid",
+     "metrics":[{"label":"Balance","value":1850,"unit":"RM"},
+                {"label":"Spent","value":420,"unit":"RM"},
+                {"label":"Days left","value":12}, ...]}
+
+Rules:
+- Use the data already provided in the Pool snapshot and Recent transactions
+  blocks below. Do NOT fabricate categories or values.
+- Keep `message` short (1-2 sentences) — the chart carries the detail.
+- No markdown fences. No prose outside the JSON. Only the JSON object.
+"""
+
+
 async def ask(session: AsyncSession, *, pool_id: str, question: str) -> dict[str, Any]:
     state = await pool_financial_state(session, pool_id)
     mem = await get_pool_memory(session, pool_id)
-    sys = system_for(state.get("type", ""))
+    sys_base = system_for(state.get("type", ""))
+    sys = f"{sys_base}\n\n{_POOL_AGENT_WIDGET_GUIDE}"
     obs_str = "; ".join((o.get("note", "") for o in (mem.observations[-5:] if mem else [])))
 
     # Run local ONNX models over the pool's recent transactions; failures
@@ -483,8 +524,27 @@ async def ask(session: AsyncSession, *, pool_id: str, question: str) -> dict[str
     ml_signals = await gather_ml_signals(session, pool_id)
     ml_block = _format_ml_for_prompt(ml_signals)
 
+    # Recent transactions are needed so the agent can build a transaction_table
+    # or a daily line_chart from real data instead of inventing values.
+    recent_txs = await _recent_pool_transactions(session, pool_id, limit=40)
+    recent_serialized = [
+        {
+            "amount": float(t.amount or 0),
+            "direction": t.direction.value if hasattr(t.direction, "value") else t.direction,
+            "type": t.type.value if hasattr(t.type, "value") else t.type,
+            "description": t.description or "",
+            "person": (t.user.displayName if getattr(t, "user", None) else None),
+            "category": (t.metadata_ or {}).get("category") if isinstance(t.metadata_, dict) else None,
+            "date": t.createdAt.isoformat().replace("+00:00", "Z"),
+        }
+        for t in recent_txs
+    ]
+
     prompt = f"""Pool snapshot:
-{json.dumps({k: state.get(k) for k in ('name','type','currentBalance','totalSpent','spendCount','memberCount','daysRemaining','pace','spendByCategory')}, default=str)}
+{json.dumps({k: state.get(k) for k in ('name','type','currentBalance','totalSpent','spendCount','memberCount','daysRemaining','pace','spendByCategory','dailyAvgSpend','dailyBudgetTarget')}, default=str)}
+
+Recent transactions (newest first, max 40):
+{json.dumps(recent_serialized, default=str)}
 
 Recent agent observations: {obs_str or '(none)'}
 
@@ -492,16 +552,31 @@ Recent agent observations: {obs_str or '(none)'}
 
 User question: {question}
 
-Reply concisely (3-5 sentences). When the user asks about unusual spending,
-anomalies, or categories, base your answer on the Local ML signals above."""
+Pick ONE widget that best illustrates the answer (or none if the question is
+purely conversational), then return the JSON object described in your system
+prompt. Keep the `message` to 1-2 sentences."""
 
-    text, meta = await router.query(prompt, task_type=None, system=sys)
+    raw, meta = await router.query(
+        prompt, task_type="evaluate_spend", system=sys, json_mode=True, max_tokens=900,
+    )
 
-    # Note: not persisting user/assistant turns to AgentMessage — that table's
-    # type enum is domain-event shaped (SPEND_EVALUATION, BUDGET_WARNING, ...)
-    # not chat turns. Frontend keeps the conversation in local state.
+    # Parse the JSON. Fall back to plain-text shape if Claude refused / errored.
+    parsed: dict[str, Any] = {}
+    try:
+        parsed = json.loads(raw) if isinstance(raw, str) else (raw or {})
+    except Exception:
+        parsed = {}
 
-    return {"answer": text, "text": text, "metadata": meta, "mlSignals": ml_signals}
+    message = str(parsed.get("message") or raw or "").strip()
+    widgets = parsed.get("widgets") or []
+
+    return {
+        "answer": message,
+        "text": message,
+        "widgets": widgets,
+        "metadata": meta,
+        "mlSignals": ml_signals,
+    }
 
 
 # ---------------- Helpers ----------------

@@ -510,6 +510,7 @@ export interface AgentAskResult {
   // Backend returns `answer` (new) or `text` (older). Either may be present.
   answer?: string;
   text?: string;
+  widgets?: Array<Record<string, unknown> & { type: string }>;
   messageId?: string;
   reasoning?: string;
   mlSignals?: unknown;

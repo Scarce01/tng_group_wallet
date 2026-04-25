@@ -125,7 +125,10 @@ async def agent_ask(pool_id: str, body: AskIn,
                     auth: AuthCtx = Depends(require_auth),
                     session: AsyncSession = Depends(get_session)):
     await assert_pool_member(session, pool_id, auth.user_id)
-    return await agent_tools.ask(session, pool_id=pool_id, question=body.question)
+    try:
+        return await agent_tools.ask(session, pool_id=pool_id, question=body.question)
+    except Exception:
+        return {"text": "AI assistant unavailable — Ollama is offline.", "messageId": None, "metadata": {}}
 
 
 @pool_router.post("/suggest-split")
@@ -133,7 +136,10 @@ async def agent_suggest_split(pool_id: str,
                               auth: AuthCtx = Depends(require_auth),
                               session: AsyncSession = Depends(get_session)):
     await assert_pool_member(session, pool_id, auth.user_id)
-    return await agent_tools.suggest_split(session, pool_id=pool_id)
+    try:
+        return await agent_tools.suggest_split(session, pool_id=pool_id)
+    except Exception:
+        return {"suggestion": "AI unavailable — Ollama is offline.", "splits": []}
 
 
 @pool_router.get("/forecast")
@@ -141,7 +147,10 @@ async def agent_forecast(pool_id: str,
                          auth: AuthCtx = Depends(require_auth),
                          session: AsyncSession = Depends(get_session)):
     await assert_pool_member(session, pool_id, auth.user_id)
-    return await agent_tools.forecast_budget(session, pool_id=pool_id)
+    try:
+        return await agent_tools.forecast_budget(session, pool_id=pool_id)
+    except Exception:
+        return {"forecast": "AI unavailable — Ollama is offline.", "data": []}
 
 
 @pool_router.post("/brief")
@@ -149,7 +158,10 @@ async def agent_brief(pool_id: str,
                       auth: AuthCtx = Depends(require_auth),
                       session: AsyncSession = Depends(get_session)):
     await assert_pool_member(session, pool_id, auth.user_id)
-    return await agent_tools.generate_brief(session, pool_id=pool_id)
+    try:
+        return await agent_tools.generate_brief(session, pool_id=pool_id)
+    except Exception:
+        return {"text": "AI brief unavailable — Ollama is offline.", "messageId": None, "metadata": {}}
 
 
 @pool_router.post("/refresh-context")
@@ -187,4 +199,7 @@ async def agent_context(pool_id: str,
 
 @util_router.post("/check-scam")
 async def agent_check_scam(body: ScamIn, auth: AuthCtx = Depends(require_auth)):
-    return await agent_tools.detect_scam(body.message, language=body.language or "EN")
+    try:
+        return await agent_tools.detect_scam(body.message, language=body.language or "EN")
+    except Exception:
+        return {"isScam": False, "confidence": 0, "reason": "AI unavailable — Ollama is offline."}

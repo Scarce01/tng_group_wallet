@@ -1525,6 +1525,12 @@ export default function App() {
         open={showCreatePool}
         onOpenChange={setShowCreatePool}
         onCreatePool={handleCreatePool}
+        onJoinGroup={() => {
+          setShowCreatePool(false);
+          // Small delay so the bottom sheet finishes closing before we
+          // mount the full-screen scan view.
+          setTimeout(() => setActiveTab('scan'), 120);
+        }}
       />
 
       <NewSpendingRequestDialog

@@ -949,7 +949,7 @@ export function ProfilePage() {
       <div style={{ padding: '28px 20px 0' }}>
         <h1 style={{ fontSize: 24, fontWeight: 700, color: '#101828', margin: 0, lineHeight: '32px' }}>Profile</h1>
         <p style={{ fontSize: 14, fontWeight: 400, color: '#4A5565', margin: '6px 0 0', lineHeight: '20px' }}>
-          Selamat datang, {userName} 👋{me.isLoading ? ' …' : ''}
+          Welcome, {userName} 👋{me.isLoading ? ' …' : ''}
         </p>
       </div>
 

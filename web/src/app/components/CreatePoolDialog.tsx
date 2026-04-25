@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { Bot, Lightbulb, Sparkles, Upload, Check, Image } from 'lucide-react';
+import { Bot, Lightbulb, Sparkles, Upload, Check, Image, QrCode, ChevronRight } from 'lucide-react';
 
 const CARD_COLORS: { id: string; gradient: string; label: string }[] = [
   { id: 'blue',   gradient: 'linear-gradient(135deg, #0059BD 0%, #1777B1 100%)', label: 'Ocean Blue' },
@@ -14,9 +14,10 @@ interface CreatePoolDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onCreatePool: (pool: { name: string; recommendedContribution: number; color?: string; photo?: string }) => void;
+  onJoinGroup?: () => void;
 }
 
-export function CreatePoolDialog({ open, onOpenChange, onCreatePool }: CreatePoolDialogProps) {
+export function CreatePoolDialog({ open, onOpenChange, onCreatePool, onJoinGroup }: CreatePoolDialogProps) {
   const [name, setName] = useState('');
   const [targetAmount, setTargetAmount] = useState('');
   const [contributionType, setContributionType] = useState<'equal' | 'smart' | 'custom'>('smart');
@@ -96,9 +97,61 @@ export function CreatePoolDialog({ open, onOpenChange, onCreatePool }: CreatePoo
           </svg>
         </button>
 
-        <p style={{ fontSize: 20, fontWeight: 700, color: '#0A0A0A', margin: '0 0 20px', lineHeight: '28px' }}>
+        <p style={{ fontSize: 20, fontWeight: 700, color: '#0A0A0A', margin: '0 0 16px', lineHeight: '28px' }}>
           Create Smart Pool
         </p>
+
+        {/* ── Join Group shortcut ── */}
+        {onJoinGroup && (
+          <button
+            type="button"
+            onClick={onJoinGroup}
+            style={{
+              width: '100%',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 12,
+              padding: '14px 16px',
+              marginBottom: 20,
+              background: 'linear-gradient(135deg, #EFF6FF 0%, #DBEAFE 100%)',
+              border: '1.5px solid #BFDBFE',
+              borderRadius: 14,
+              cursor: 'pointer',
+              fontFamily: 'Inter, sans-serif',
+              textAlign: 'left',
+            }}
+          >
+            <div style={{
+              width: 40, height: 40, borderRadius: 12,
+              background: '#005AFF',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              flexShrink: 0,
+              boxShadow: '0 2px 6px rgba(0,90,255,0.3)',
+            }}>
+              <QrCode size={20} color="#fff" strokeWidth={2.2} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <p style={{ margin: 0, fontSize: 14, fontWeight: 700, color: '#0A0A0A' }}>
+                Join existing group
+              </p>
+              <p style={{ margin: '2px 0 0', fontSize: 12, color: '#475569' }}>
+                Scan an invite QR code with your camera
+              </p>
+            </div>
+            <ChevronRight size={18} color="#005AFF" />
+          </button>
+        )}
+
+        {/* Divider with label */}
+        {onJoinGroup && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
+            <div style={{ flex: 1, height: 1, background: '#E5E7EB' }} />
+            <span style={{ fontSize: 11, fontWeight: 600, color: '#9CA3AF', letterSpacing: 1 }}>
+              OR CREATE NEW
+            </span>
+            <div style={{ flex: 1, height: 1, background: '#E5E7EB' }} />
+          </div>
+        )}
 
         {/* ── Card Preview ── */}
         <div style={{ marginBottom: 20 }}>

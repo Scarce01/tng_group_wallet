@@ -635,13 +635,13 @@ export function ManageMembersDialog({
                 <circle cx="8" cy="5" r="0.667" fill="#3B82F6"/>
               </svg>
               <p style={{ fontFamily: 'Inter, sans-serif', fontWeight: 400, fontSize: '12px', lineHeight: '18px', color: '#1D4ED8', margin: 0 }}>
-                Tetapkan had perbelanjaan harian untuk semua ahli pool. Sebarang perbelanjaan melebihi had ini memerlukan kelulusan Admin.
+                Set a daily spending limit for all pool members. Any spending above this limit requires Admin approval.
               </p>
             </div>
 
             {/* Input label */}
             <p style={{ fontFamily: 'Inter, sans-serif', fontWeight: 600, fontSize: '13px', color: '#374151', marginBottom: '8px', marginTop: 0 }}>
-              Had Perbelanjaan Harian (RM)
+              Daily Spending Limit (RM)
             </p>
 
             {/* RM input */}
@@ -753,7 +753,7 @@ export function ManageMembersDialog({
                     <circle cx="10" cy="12.5" r="1.667" stroke="white" strokeWidth="1.5"/>
                   </svg>
                   <span style={{ fontFamily: 'Inter, sans-serif', fontWeight: 700, fontSize: '16px', color: '#fff' }}>
-                    Simpan Had
+                    Save Limit
                   </span>
                 </>
               )}

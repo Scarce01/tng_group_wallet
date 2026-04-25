@@ -1148,7 +1148,7 @@ function TripSelector({ pools, activeId, onSelect }: { pools: PoolSummary[]; act
               style={{
                 display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                 padding: '12px 16px',
-                background: id === tripId ? 'rgba(0,229,255,0.08)' : 'transparent',
+                background: id === activeId ? 'rgba(0,229,255,0.08)' : 'transparent',
                 borderBottom: idx < allTrips.length - 1 ? '1px solid rgba(255,255,255,0.05)' : 'none',
                 cursor: 'pointer',
                 transition: 'background 0.15s',
@@ -1156,18 +1156,18 @@ function TripSelector({ pools, activeId, onSelect }: { pools: PoolSummary[]; act
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <div style={{ width: 20, height: 20, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <IconComponent type={t.icon} color={id === tripId ? C.cyan : '#fff'} size={20} />
+                  <IconComponent type={t.icon} color={id === activeId ? C.cyan : '#fff'} size={20} />
                 </div>
                 <div>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: id === tripId ? C.cyan : '#fff' }}>{t.name}</div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: id === activeId ? C.cyan : '#fff' }}>{t.name}</div>
                   <div style={{ fontSize: 10, color: 'rgba(190,219,255,0.4)' }}>{t.members} ahli</div>
                 </div>
               </div>
               <div style={{ textAlign: 'right' }}>
-                <div style={{ fontSize: 13, fontWeight: 800, color: id === tripId ? C.cyan : 'rgba(255,255,255,0.7)' }}>
+                <div style={{ fontSize: 13, fontWeight: 800, color: id === activeId ? C.cyan : 'rgba(255,255,255,0.7)' }}>
                   RM {t.total.toLocaleString()}
                 </div>
-                {id === tripId && (
+                {id === activeId && (
                   <div style={{ fontSize: 9, color: C.cyan, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Active</div>
                 )}
               </div>

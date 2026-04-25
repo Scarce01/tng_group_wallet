@@ -1,0 +1,160 @@
+/* 🌈 COLOR SYSTEM */
+:root {
+  /* Primary Blue (TNG Core) */
+  --color-primary: #005AFF;
+  --color-blue-gradient-start: #1A73FF;
+  --color-blue-gradient-end: #4DA3FF;
+
+  /* Accent Yellow */
+  --color-accent: #FFD700;
+  --color-accent-soft: #FFF4CC;
+
+  /* Background System */
+  --color-bg-main: #F5F7FA;
+  --color-bg-soft: #EEF2F7;
+  --color-card-surface: #FFFFFF;
+
+  /* Text Colors */
+  --color-text-primary: #1A1A1A;
+  --color-text-secondary: #6B7280;
+  --color-text-light: #9CA3AF;
+
+  /* Gradients */
+  --gradient-header: linear-gradient(135deg, #005AFF 0%, #4DA3FF 100%);
+  --gradient-cta: linear-gradient(135deg, #005AFF 0%, #FFD700 100%);
+  --gradient-card-glow: rgba(0, 90, 255, 0.1);
+
+  /* Shadows */
+  --shadow-card: 0 8px 24px rgba(0, 0, 0, 0.08);
+  --shadow-card-hover: 0 12px 32px rgba(0, 0, 0, 0.12);
+  --shadow-nav: 0 -2px 12px rgba(0, 0, 0, 0.04);
+
+  /* Spacing (8pt grid) */
+  --space-xs: 8px;
+  --space-sm: 16px;
+  --space-md: 24px;
+  --space-lg: 32px;
+  --space-xl: 40px;
+
+  /* Border Radius */
+  --radius-sm: 12px;
+  --radius-md: 16px;
+  --radius-lg: 20px;
+  --radius-xl: 24px;
+  --radius-pill: 28px;
+
+  /* Component Specific */
+  --screen-padding: 20px;
+  --card-spacing: 16px;
+  --section-gap: 24px;
+}
+
+/* 🧱 FLOATING CARD */
+.floating-card {
+  background: var(--color-card-surface);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  transition: all 0.3s ease;
+}
+
+.floating-card:hover {
+  box-shadow: var(--shadow-card-hover);
+  transform: translateY(-2px);
+}
+
+/* 🔵 BALANCE CARD (Hero) */
+.balance-card {
+  background: var(--gradient-header);
+  border-radius: var(--radius-xl);
+  padding: 24px;
+  box-shadow: var(--shadow-card);
+  position: relative;
+  overflow: hidden;
+}
+
+.balance-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: radial-gradient(circle at top right, rgba(255, 255, 255, 0.1), transparent);
+  pointer-events: none;
+}
+
+/* 🔘 PRIMARY BUTTON */
+.btn-primary {
+  height: 56px;
+  border-radius: var(--radius-pill);
+  background: var(--gradient-cta);
+  color: white;
+  font-weight: 600;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 16px rgba(0, 90, 255, 0.3);
+}
+
+.btn-primary:hover {
+  transform: scale(0.98);
+  box-shadow: 0 6px 20px rgba(0, 90, 255, 0.4);
+}
+
+.btn-primary:active {
+  transform: scale(0.96);
+}
+
+/* 🎞️ INTERACTION ANIMATIONS */
+.press-scale {
+  transition: transform 0.15s ease;
+}
+
+.press-scale:active {
+  transform: scale(0.96);
+}
+
+.card-lift {
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.card-lift:hover {
+  transform: translateY(-4px);
+}
+
+/* 📊 PROGRESS BAR */
+.progress-bar {
+  height: 8px;
+  background: var(--color-bg-soft);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: var(--gradient-cta);
+  border-radius: 4px;
+  transition: width 0.6s ease;
+}
+
+/* 📍 NAVIGATION BAR */
+.nav-bar {
+  background: var(--color-card-surface);
+  box-shadow: var(--shadow-nav);
+  padding: 12px 20px;
+}
+
+.nav-icon-active {
+  color: var(--color-primary);
+}
+
+.nav-icon-inactive {
+  color: var(--color-text-light);
+}
+
+/* 🙈 HIDE SCROLLBARS — keep scroll functionality, hide the bar */
+* {
+  scrollbar-width: none;       /* Firefox */
+  -ms-overflow-style: none;   /* IE / Edge */
+}
+*::-webkit-scrollbar {
+  display: none;               /* Chrome / Safari / WebKit */
+}

@@ -6,9 +6,11 @@ from urllib.parse import urlparse, urlunparse
 
 from dotenv import load_dotenv
 
-# Load .env from project root (parent of backend/) — matches Node behavior
+# Load .env from project root (parent of backend/) — matches Node behavior.
+# `override=True` matches Node's dotenv: a value in .env wins over an empty
+# placeholder in the parent shell (common when the shell pre-exports keys).
 _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-load_dotenv(os.path.join(_ROOT, ".env"))
+load_dotenv(os.path.join(_ROOT, ".env"), override=True)
 
 
 def _parse_duration_seconds(s: str) -> int:

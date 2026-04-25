@@ -251,3 +251,88 @@ class Notification(Base):
         Index("Notification_userId_isRead_idx", "userId", "isRead"),
         Index("Notification_createdAt_idx", "createdAt"),
     )
+
+
+# ==================== POOL AGENT MEMORY ====================
+# Per-pool brain. Holds the parsed user intent (purpose, goals, location),
+# a spending plan, agent personality knobs, and a running diary of
+# observations. External-context cache columns (weather, places, currency)
+# are reserved for the MCP-Client layer; those slots stay null until the
+# Phase-2 MCP integration ships.
+
+class PoolAgentMemory(Base):
+    __tablename__ = "PoolAgentMemory"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_id)
+    poolId: Mapped[str] = mapped_column(String, ForeignKey("Pool.id", ondelete="CASCADE"), unique=True)
+
+    # Core identity
+    purpose: Mapped[str] = mapped_column(Text)
+    parsedGoals: Mapped[Optional[list]] = mapped_column(JSONB, default=list)
+    location: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    locationCoords: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+
+    # Spending plan
+    spendingPlan: Mapped[Optional[list]] = mapped_column(JSONB, default=list)
+    splitStrategy: Mapped[str] = mapped_column(String, default="equal")
+
+    # Personality
+    strictness: Mapped[str] = mapped_column(String, default="moderate")
+    detectedTone: Mapped[str] = mapped_column(String, default="neutral")
+    humorAllowed: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # Running observations (agent diary)
+    observations: Mapped[Optional[list]] = mapped_column(JSONB, default=list)
+
+    # External context cache — reserved for MCP Client (Phase 2)
+    weatherCache: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    locationTips: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    currencyRates: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    flightPrices: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    searchCache: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+
+    lastBriefAt: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    lastContextRefresh: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    createdAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    updatedAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+
+
+class UserAgentMemory(Base):
+    __tablename__ = "UserAgentMemory"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_id)
+    userId: Mapped[str] = mapped_column(String, ForeignKey("User.id", ondelete="CASCADE"), unique=True)
+
+    dietaryRestrictions: Mapped[Optional[list]] = mapped_column(JSONB, default=list)
+    activityPreferences: Mapped[Optional[list]] = mapped_column(JSONB, default=list)
+    budgetTendency: Mapped[str] = mapped_column(String, default="moderate")
+    typicalBudgetCap: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 2), nullable=True)
+    homeLocation: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+
+    voteStyle: Mapped[str] = mapped_column(String, default="steady")
+    contributionPattern: Mapped[str] = mapped_column(String, default="on_time")
+    communicationStyle: Mapped[str] = mapped_column(String, default="brief")
+    preferredLanguage: Mapped[str] = mapped_column(String, default="EN")
+
+    frequentPartners: Mapped[Optional[list]] = mapped_column(JSONB, default=list)
+    poolHistory: Mapped[Optional[list]] = mapped_column(JSONB, default=list)
+
+    createdAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    updatedAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+
+
+class AgentMessage(Base):
+    __tablename__ = "AgentMessage"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_id)
+    poolId: Mapped[str] = mapped_column(String, ForeignKey("Pool.id", ondelete="CASCADE"))
+    type: Mapped[E.AgentMessageType] = mapped_column(E_(E.AgentMessageType, "AgentMessageType"))
+    content: Mapped[str] = mapped_column(Text)
+    metadata_: Mapped[Optional[dict]] = mapped_column("metadata", JSONB, nullable=True)
+    isRead: Mapped[bool] = mapped_column(Boolean, default=False)
+    createdAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+    __table_args__ = (
+        Index("AgentMessage_poolId_createdAt_idx", "poolId", "createdAt"),
+        Index("AgentMessage_type_idx", "type"),
+    )

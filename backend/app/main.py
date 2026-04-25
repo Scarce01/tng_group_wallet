@@ -22,6 +22,7 @@ from .config import cors_origin_allowed, env
 from .db import SessionLocal
 from .errors import AppError
 from .pubsub import pubsub
+from .routes import agent as agent_routes
 from .routes import auth as auth_routes
 from .routes import contributions as contrib_routes
 from .routes import invites as invite_routes
@@ -185,6 +186,8 @@ def create_app() -> FastAPI:
     app.include_router(contrib_routes.router, prefix="/api/v1/pools/{pool_id}/contributions")
     app.include_router(spend_routes.router, prefix="/api/v1/pools/{pool_id}/spend-requests")
     app.include_router(zk_routes.router, prefix="/api/v1/pools/{pool_id}/zk")
+    app.include_router(agent_routes.pool_router, prefix="/api/v1/pools/{pool_id}/agent")
+    app.include_router(agent_routes.util_router, prefix="/api/v1/agent")
     app.include_router(tx_routes.router, prefix="/api/v1/pools/{pool_id}")
 
     # --- WebSocket ---

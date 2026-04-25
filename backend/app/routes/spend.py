@@ -37,6 +37,19 @@ async def create(pool_id: str, body: CreateSpendRequestIn,
     )
     out = model_to_dict(sr)
     publish_to_pool(pool_id, "spend_request_created", {"spendRequest": out})
+
+    # Fire agent evaluation in the background. We deliberately do NOT await
+    # — Ollama takes 3-15s and the requester shouldn't wait on it. The
+    # eval lands as an AgentMessage and the result is pushed via WS.
+    from ..agent.triggers import on_spend_request as _agent_on_spend
+    _agent_on_spend(
+        pool_id=pool_id,
+        amount=body.amount,
+        category=body.category,
+        title=body.title,
+        description=body.description,
+    )
+
     return out
 
 

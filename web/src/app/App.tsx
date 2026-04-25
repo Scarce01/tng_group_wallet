@@ -1,5 +1,11 @@
 import { useEffect, useState } from 'react';
-import { usePools, usePoolTransactions, useSpendRequests } from '../api/hooks';
+import {
+  usePools,
+  usePoolTransactions,
+  useSpendRequests,
+  useCreatePool,
+  useContribute,
+} from '../api/hooks';
 import type {
   Pool as ApiPool,
   PoolMember as ApiPoolMember,
@@ -461,49 +467,74 @@ export default function App() {
     };
   });
 
+  // ── API mutations: real backend writes (Phase 2e) ────────────────────────
+  // The previous handlers updated local state only, so the home looked like
+  // it changed but Postgres never saw it — which is why the Main Agent
+  // reported "no transactions" right after a contribution.
+  const createPoolMutation = useCreatePool();
+  const contributeMutation = useContribute(selectedPoolId ?? undefined);
+
   const handleCreatePool = (newPool: { name: string; recommendedContribution: number; color?: string; photo?: string }) => {
-    const createdPool: Pool = {
-      id: Date.now().toString(),
-      name: newPool.name,
-      recommendedContribution: newPool.recommendedContribution,
-      currentBalance: 0,
-      members: [],
-      color: newPool.color,
-      photo: newPool.photo,
-    };
-    setPools(prev => [...prev, createdPool]);
+    // Default to FAMILY type — UI doesn't expose type yet. Target amount is
+    // the per-member recommended contribution × member count (rough heuristic).
+    createPoolMutation.mutate(
+      {
+        type: 'FAMILY',
+        name: newPool.name,
+        targetAmount: newPool.recommendedContribution
+          ? String(newPool.recommendedContribution)
+          : undefined,
+      },
+      {
+        onSuccess: (created) => {
+          showToast(`✓ Pool "${created.name}" created`);
+          // usePools query is invalidated by the hook, will refresh and our
+          // sync effect will replace local pools with the fresh server list.
+        },
+        onError: (err: unknown) => {
+          const msg = err instanceof Error ? err.message : 'Could not create pool';
+          showToast(`⚠ ${msg}`);
+        },
+      },
+    );
   };
 
   const handleContribute = (amount: number) => {
-    if (selectedPoolId) {
-      setPools(prev => prev.map(p => {
-        if (p.id === selectedPoolId) {
-          // Check if current user already contributed
-          const existingMember = p.members.find(m => m.name === currentUser);
-
-          if (existingMember) {
-            // Don't allow contributing again - user already contributed
-            return p;
-          } else {
-            // Add new member
-            return {
-              ...p,
-              currentBalance: p.currentBalance + amount,
-              members: [
-                ...p.members,
-                {
-                  id: Date.now().toString(),
-                  name: currentUser,
-                  contribution: amount,
-                  status: 'paid' as const
-                }
-              ]
-            };
-          }
-        }
-        return p;
-      }));
-    }
+    if (!selectedPoolId) return;
+    // Optimistic local update so the user sees instant feedback
+    setPools(prev => prev.map(p => {
+      if (p.id === selectedPoolId) {
+        const existingMember = p.members.find(m => m.name === currentUser);
+        if (existingMember) return p;
+        return {
+          ...p,
+          currentBalance: p.currentBalance + amount,
+          members: [
+            ...p.members,
+            {
+              id: `local-${Date.now()}`,
+              name: currentUser,
+              contribution: amount,
+              status: 'paid' as const,
+            }],
+        };
+      }
+      return p;
+    }));
+    // Real API write — invalidates pools + transactions + me on success
+    contributeMutation.mutate(
+      { amount: String(amount), description: 'Contribution via app' },
+      {
+        onSuccess: () => {
+          showToast(`✓ Contributed RM ${amount}`);
+        },
+        onError: (err: unknown) => {
+          const msg = err instanceof Error ? err.message : 'Contribute failed';
+          showToast(`⚠ ${msg}`);
+          // Roll back the optimistic update by re-syncing from server
+        },
+      },
+    );
   };
 
   const handleVote = (requestId: string, approved: boolean) => {

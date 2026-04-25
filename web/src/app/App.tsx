@@ -7,6 +7,7 @@ import type {
   SpendRequest as ApiSpendRequest,
 } from '../api/client';
 import { CreatePoolDialog } from './components/CreatePoolDialog';
+import { MainAgentChat } from './components/MainAgentChat';
 import { NewSpendingRequestDialog } from './components/NewSpendingRequestDialog';
 import { TransactionDetailDialog } from './components/TransactionDetailDialog';
 import { ManageMembersDialog } from './components/ManageMembersDialog';
@@ -168,6 +169,7 @@ export default function App() {
   const [showTimeFilter, setShowTimeFilter] = useState(false);
 
   // ── AI Advisor action sheet states ──
+  const [showMainAgent, setShowMainAgent] = useState(false);
   const [showFreezeSheet, setShowFreezeSheet] = useState(false);
   const [showSmartCallSheet, setShowSmartCallSheet] = useState(false);
   const [contributeVotingPowerMode, setContributeVotingPowerMode] = useState(false);
@@ -581,10 +583,12 @@ export default function App() {
                       </div>
                       <div className="flex items-center gap-2">
                         <button
+                          onClick={() => setShowMainAgent(true)}
                           className="w-10 h-10 rounded-full flex items-center justify-center relative"
                           style={{ background: '#FFFFFF', boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}
+                          aria-label="Open AI assistant"
                         >
-                          <Bell className="w-5 h-5" style={{ color: '#6B7280' }} />
+                          <Sparkles className="w-5 h-5" style={{ color: '#005AFF' }} />
                           <span className="absolute top-2 right-2 w-2 h-2 rounded-full" style={{ background: '#005AFF' }} />
                         </button>
                       </div>
@@ -1522,6 +1526,8 @@ export default function App() {
         </div>
         )}
       </div>
+
+      <MainAgentChat open={showMainAgent} onClose={() => setShowMainAgent(false)} />
 
       <CreatePoolDialog
         open={showCreatePool}

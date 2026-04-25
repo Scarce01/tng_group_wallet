@@ -369,3 +369,26 @@ class AgentMessage(Base):
         Index("AgentMessage_poolId_createdAt_idx", "poolId", "createdAt"),
         Index("AgentMessage_type_idx", "type"),
     )
+
+
+class AgentConversation(Base):
+    """Per-user chat history for the global Main Agent.
+
+    `messages` is a JSONB list of {role, content, widgets?, toolCalls?,
+    timestamp} entries — append-only on each turn. `context` is a small
+    scratchpad for mid-flow state (e.g. partially gathered pool-creation
+    fields) so the LLM doesn't have to re-extract them every turn.
+    """
+    __tablename__ = "AgentConversation"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_id)
+    userId: Mapped[str] = mapped_column(String, ForeignKey("User.id", ondelete="CASCADE"))
+    messages: Mapped[list] = mapped_column(JSONB, default=list)
+    context: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    isActive: Mapped[bool] = mapped_column(Boolean, default=True)
+    createdAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    updatedAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+
+    __table_args__ = (
+        Index("AgentConversation_userId_isActive_idx", "userId", "isActive"),
+    )

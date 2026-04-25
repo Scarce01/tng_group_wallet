@@ -527,6 +527,71 @@ export function useAcceptQrInvite() {
   });
 }
 
+// ----------------- Main Agent (global chat) -----------------
+
+export interface MainAgentWidget {
+  type: string;
+  [key: string]: unknown;
+}
+
+export interface MainAgentMessage {
+  role: 'user' | 'agent';
+  content: string;
+  widgets?: MainAgentWidget[];
+  toolCalls?: unknown[];
+  timestamp?: string;
+}
+
+export interface MainAgentReply {
+  message: string;
+  widgets: MainAgentWidget[];
+  toolResults?: unknown[];
+}
+
+export function useMainAgentConversation() {
+  return useQuery({
+    queryKey: ['main-agent', 'conversation'],
+    queryFn: async () => {
+      const r = await api<{ items: MainAgentMessage[] }>('/agent/conversation');
+      return r.items;
+    },
+    enabled: !!tokens.access,
+    staleTime: 30_000,
+  });
+}
+
+export function useSendMainAgentMessage() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { message: string }) =>
+      api<MainAgentReply>('/agent/message', { method: 'POST', body: vars }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['main-agent', 'conversation'] });
+    },
+  });
+}
+
+export function useClearMainAgent() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api('/agent/conversation', { method: 'DELETE' }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['main-agent', 'conversation'] });
+    },
+  });
+}
+
+export function useConfirmMainAgentAction() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { action: string; params: Record<string, unknown> }) =>
+      api<{ ok: boolean }>('/agent/action-confirm', { method: 'POST', body: vars }),
+    onSuccess: () => {
+      qc.invalidateQueries(); // balance + pools + tx may all have changed
+    },
+  });
+}
+
 // ----------------- Top up (demo helper) -----------------
 
 export function useTopup() {

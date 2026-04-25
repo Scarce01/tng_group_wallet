@@ -58,7 +58,7 @@ async def setup_pool_agent(
 Description:
 \"\"\"{description}\"\"\"
 
-Pool budget: RM {state.get('targetAmount') or 'not set'}, member count: {state.get('memberCount', 0)}.
+Member count: {state.get('memberCount', 0)}.
 
 Return ONLY JSON, no prose."""
     raw, meta = await router.query(prompt, task_type="extract_pool", system=sys, json_mode=True)
@@ -121,9 +121,9 @@ async def evaluate_spend(
 - description: {description or '(none)'}
 
 Pool state:
-- balance RM {state.get('currentBalance')}, target RM {state.get('targetAmount') or '-'}
+- balance RM {state.get('currentBalance')}
 - spent so far RM {state.get('totalSpent')} ({state.get('spendCount')} executed)
-- pace: {state.get('pace')}, daily avg RM {state.get('dailyAvgSpend')} vs target RM {state.get('dailyBudgetTarget')}
+- pace: {state.get('pace')}, daily avg RM {state.get('dailyAvgSpend')}
 - spending plan: {plan_str}
 - members: {len(state.get('members', []))}, days remaining: {state.get('daysRemaining')}{ext_block}
 
@@ -165,7 +165,7 @@ async def generate_brief(session: AsyncSession, *, pool_id: str) -> dict[str, An
     ext_block = format_external_for_prompt(ext_ctx)
 
     prompt = f"""Write a 3-sentence daily brief for the pool members.
-- balance RM {state.get('currentBalance')}, spent RM {state.get('totalSpent')} of RM {state.get('targetAmount') or '-'}
+- balance RM {state.get('currentBalance')}, spent RM {state.get('totalSpent')}
 - pace: {state.get('pace')}, days remaining: {state.get('daysRemaining')}
 - spend by category: {state.get('spendByCategory')}
 - recent observations: {obs_str}{ext_block}
@@ -239,9 +239,9 @@ async def forecast_budget(session: AsyncSession, *, pool_id: str) -> dict[str, A
     sys = system_for(state.get("type", ""))
 
     prompt = f"""Project end-of-period spending for this pool.
-- balance RM {state.get('currentBalance')}, target RM {state.get('targetAmount') or '-'}
+- balance RM {state.get('currentBalance')}
 - spent RM {state.get('totalSpent')}, {state.get('daysElapsed')} days elapsed, {state.get('daysRemaining')} remaining
-- daily avg: RM {state.get('dailyAvgSpend')}, daily budget target: RM {state.get('dailyBudgetTarget')}
+- daily avg: RM {state.get('dailyAvgSpend')}
 
 Return:
 projectedFinalSpend: <number RM>
@@ -484,7 +484,7 @@ async def ask(session: AsyncSession, *, pool_id: str, question: str) -> dict[str
     ml_block = _format_ml_for_prompt(ml_signals)
 
     prompt = f"""Pool snapshot:
-{json.dumps({k: state.get(k) for k in ('name','type','currentBalance','targetAmount','totalSpent','spendCount','memberCount','daysRemaining','pace','spendByCategory')}, default=str)}
+{json.dumps({k: state.get(k) for k in ('name','type','currentBalance','totalSpent','spendCount','memberCount','daysRemaining','pace','spendByCategory')}, default=str)}
 
 Recent agent observations: {obs_str or '(none)'}
 

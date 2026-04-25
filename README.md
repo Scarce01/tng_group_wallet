@@ -27,7 +27,7 @@
 ## Table of Contents
 
 - [💡 What Is This?](#-what-is-this)
-- [🔄 How It Works 
+- [🔄 How It Works (In Plain English)](#-how-it-works-in-plain-english)
 - [🏗️ Architecture Overview](#️-architecture-overview)
 - [📂 Repository Structure](#-repository-structure)
 - [⚙️ Tech Stack](#️-tech-stack)
@@ -42,6 +42,7 @@
 - [📡 Full API Surface](#-full-api-surface)
 - [🗄️ Database Schema](#️-database-schema)
 - [☁️ AWS Infrastructure](#️-aws-infrastructure)
+- [🌏 Alibaba Cloud Architecture](#-alibaba-cloud-architecture)
 - [🚀 Getting Started](#-getting-started)
 - [👤 Demo Accounts](#-demo-accounts)
 - [📦 Deployment](#-deployment)
@@ -61,7 +62,7 @@ The whole thing was built in about 13 hours for a hackathon — ported from a No
 
 ---
 
-## 🔄 How It Works 
+## 🔄 How It Works (In Plain English)
 
 1. 📱 **Sign up** with your Malaysian phone number and a 6-digit PIN.
 2. 🏊 **Create a pool** — pick "Trip" or "Family", name it, set a target amount, choose your voting rules (majority, unanimous, admin-only, etc.).
@@ -754,6 +755,268 @@ GET    /api/v1/health
 
 ---
 
+## 🌏 Alibaba Cloud Architecture
+
+The frontend is deployed on Alibaba Cloud (Singapore region) as a static SPA, with API calls proxied back to the AWS-hosted FastAPI backend.
+
+### 🌐 Domain & Access
+
+| Item | Value |
+|------|-------|
+| **URL** | `https://kongsigo.8.219.142.196.nip.io/` |
+| **IP** | `8.219.142.196` |
+| **DNS** | nip.io wildcard (free, zero-config) |
+| **SSL** | Let's Encrypt, auto-renew, expires 2026-07-24 |
+| **Region** | `ap-southeast-1` (Singapore) |
+
+### 📐 Architecture Diagram
+
+```
+                         ┌────────────────────────────────────────┐
+                         │          ALIBABA CLOUD                 │
+                         │        ap-southeast-1 (Singapore)      │
+                         │                                        │
+                         │  ┌──────────────────────────────────┐  │
+                         │  │  nip.io Wildcard DNS             │  │
+                         │  │  kongsigo.8.219.142.196.nip.io   │  │
+                         │  │  → 8.219.142.196                 │  │
+                         │  └───────────────┬──────────────────┘  │
+                         │                  │                     │
+  ┌──────────────┐       │  ┌───────────────▼──────────────────┐  │
+  │ 📱 Browser   │──HTTPS──▶│  EIP: 8.219.142.196 (5 Mbps)    │  │
+  │ (User)       │       │  │  PayByTraffic                    │  │
+  └──────────────┘       │  └───────────────┬──────────────────┘  │
+                         │                  │                     │
+                         │  ┌───────────────▼──────────────────┐  │
+                         │  │  ECS Instance                    │  │
+                         │  │  i-t4n8yxqknl6nr9m2jipc          │  │
+                         │  │  ecs.t6-c1m1.large               │  │
+                         │  │  2 vCPU / 2 GB RAM               │  │
+                         │  │  Ubuntu 22.04 LTS                │  │
+                         │  │                                  │  │
+                         │  │  ┌────────────────────────────┐  │  │
+                         │  │  │  Nginx (Port 80 / 443)     │  │  │
+                         │  │  │                            │  │  │
+                         │  │  │  • SSL termination         │  │  │
+                         │  │  │    (Let's Encrypt cert)    │  │  │
+                         │  │  │  • HTTP → HTTPS redirect   │  │  │
+                         │  │  │  • Reverse proxy → :3000   │  │  │
+                         │  │  └─────────────┬──────────────┘  │  │
+                         │  │               │                  │  │
+                         │  │  ┌─────────────▼──────────────┐  │  │
+                         │  │  │  Node.js Server (:3000)    │  │  │
+                         │  │  │  server.cjs                │  │  │
+                         │  │  │                            │  │  │
+                         │  │  │  Static Files:             │  │  │
+                         │  │  │  └─ web/dist/              │  │  │
+                         │  │  │     ├─ index.html          │  │  │
+                         │  │  │     ├─ assets/*.js         │  │  │
+                         │  │  │     ├─ assets/*.css        │  │  │
+                         │  │  │     └─ assets/*.png        │  │  │
+                         │  │  │                            │  │  │
+                         │  │  │  Proxy Rules:              │  │  │
+                         │  │  │  /api/* ──────────────────────────────▶ AWS EC2
+                         │  │  │     → 47.128.148.79:8000   │  │  │    (Backend)
+                         │  │  │                            │  │  │
+                         │  │  │  SPA Fallback:             │  │  │
+                         │  │  │  /* → index.html           │  │  │
+                         │  │  └────────────────────────────┘  │  │
+                         │  │                                  │  │
+                         │  └──────────────────────────────────┘  │
+                         │                                        │
+                         │  ┌──────────────────────────────────┐  │
+                         │  │  VPC                             │  │
+                         │  │  vpc-t4nt4fcj67lhsiyme97ci       │  │
+                         │  │  CIDR: 172.16.0.0/16             │  │
+                         │  │                                  │  │
+                         │  │  VSwitch                         │  │
+                         │  │  vsw-t4nl4cqzk9ocicdn1isj3      │  │
+                         │  │  Zone: ap-southeast-1a           │  │
+                         │  │  CIDR: 172.16.0.0/24             │  │
+                         │  │                                  │  │
+                         │  │  Security Group                  │  │
+                         │  │  sg-t4ne69ubo68hlkqxbzff         │  │
+                         │  │  Inbound: 22, 80, 443, 3000,    │  │
+                         │  │           5173 (0.0.0.0/0)       │  │
+                         │  └──────────────────────────────────┘  │
+                         │                                        │
+                         │  ┌──────────────────────────────────┐  │
+                         │  │  FC (Function Compute) — Backup  │  │
+                         │  │  Function: kongsigo-web           │  │
+                         │  │  Runtime: Custom (Node.js)       │  │
+                         │  │  Memory: 512 MB / CPU: 0.35      │  │
+                         │  │  URL: kongsigo-web-xrnohqpdht    │  │
+                         │  │  .ap-southeast-1.fcapp.run       │  │
+                         │  └──────────────────────────────────┘  │
+                         │                                        │
+                         └────────────────────────────────────────┘
+```
+
+### 📦 Resource Inventory
+
+| Resource | ID / Name | Spec | Status |
+|----------|-----------|------|--------|
+| **ECS** | `i-t4n8yxqknl6nr9m2jipc` | t6-c1m1.large (2vCPU / 2GB) | ✅ Running |
+| **EIP** | `eip-t4nlfah53crdtjjlaqzr4` | 8.219.142.196, 5 Mbps | ✅ Bound |
+| **VPC** | `vpc-t4nt4fcj67lhsiyme97ci` | 172.16.0.0/16 | ✅ Active |
+| **VSwitch** | `vsw-t4nl4cqzk9ocicdn1isj3` | zone-a, 172.16.0.0/24 | ✅ Active |
+| **Security Group** | `sg-t4ne69ubo68hlkqxbzff` | 22/80/443/3000/5173 | ✅ Active |
+| **FC** | `kongsigo-web` | Custom runtime, 512MB | ✅ Backup |
+| **SSL Cert** | Let's Encrypt | Auto-renew, exp 2026-07-24 | ✅ Valid |
+| **Domain** | `kongsigo.8.219.142.196.nip.io` | nip.io wildcard DNS | ✅ Resolving |
+
+### 🔧 ECS Software Stack
+
+```
+Ubuntu 22.04 LTS
+├── Node.js 20.x (LTS)
+├── npm 10.x
+├── Nginx 1.18
+│   ├── /etc/nginx/sites-available/kongsigo
+│   └── /etc/letsencrypt/live/kongsigo.8.219.142.196.nip.io/
+├── Certbot (Let's Encrypt client)
+└── Application
+    └── /root/tng_group_wallet/
+        ├── web/dist/          ← Production build (React SPA)
+        ├── web/server.cjs     ← Node.js static server + API proxy
+        └── web/vite.config.ts ← Dev config (proxy → AWS EC2)
+```
+
+#### Running Services
+
+| Service | Port | Manager | Auto-Start |
+|---------|------|---------|------------|
+| **Nginx** | 80, 443 | systemd | ✅ Yes |
+| **Node.js server.cjs** | 3000 | nohup | ❌ Manual |
+
+### 🌊 Request Flow
+
+```
+User Browser
+    │
+    │  HTTPS (port 443)
+    ▼
+┌─────────────────────┐
+│  Nginx              │
+│  SSL termination    │
+│  Let's Encrypt cert │
+└─────────┬───────────┘
+          │ proxy_pass :3000
+          ▼
+┌─────────────────────┐       ┌──────────────────────────┐
+│  Node.js server.cjs │       │  AWS EC2 Backend          │
+│                     │       │  47.128.148.79:8000        │
+│  /api/* ────────────────▶   │  FastAPI + Uvicorn         │
+│                     │       │                            │
+│  /* ─── dist/ files │       │  ├── /api/v1/auth/*        │
+│  fallback: index.html       │  ├── /api/v1/pools/*       │
+└─────────────────────┘       │  ├── /api/v1/payment/*     │
+                              │  └── /api/v1/invites/*     │
+                              └──────────────────────────┘
+```
+
+### 🔐 Security Configuration
+
+#### Nginx SSL (Let's Encrypt)
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name kongsigo.8.219.142.196.nip.io;
+
+    ssl_certificate     /etc/letsencrypt/live/kongsigo.8.219.142.196.nip.io/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/kongsigo.8.219.142.196.nip.io/privkey.pem;
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+    }
+}
+
+server {
+    listen 80;
+    return 301 https://$host$request_uri;  # Force HTTPS
+}
+```
+
+#### Security Group Rules
+
+| Direction | Protocol | Port | Source | Purpose |
+|-----------|----------|------|--------|--------|
+| Inbound | TCP | 22 | 0.0.0.0/0 | SSH |
+| Inbound | TCP | 80 | 0.0.0.0/0 | HTTP → HTTPS redirect |
+| Inbound | TCP | 443 | 0.0.0.0/0 | HTTPS (production) |
+| Inbound | TCP | 3000 | 0.0.0.0/0 | Node.js direct (dev) |
+| Inbound | TCP | 5173 | 0.0.0.0/0 | Vite dev server (dev) |
+
+### 🔄 Deployment Steps
+
+#### Build & Deploy Frontend
+
+```bash
+# On local machine
+cd web
+npm run build
+
+# Upload to ECS
+scp -r dist/ root@8.219.142.196:/root/tng_group_wallet/web/
+
+# Or SSH in and pull from git
+ssh root@8.219.142.196
+cd /root/tng_group_wallet
+git pull
+cd web && npm install && npm run build
+```
+
+#### Restart Services
+
+```bash
+# Restart Nginx (if config changed)
+sudo systemctl restart nginx
+
+# Restart Node.js server
+ps aux | grep server.cjs
+kill <PID>
+
+cd /root/tng_group_wallet/web
+nohup node server.cjs > /tmp/server.log 2>&1 &
+```
+
+### 🔗 FC (Function Compute) — Backup Deployment
+
+The FC deployment serves as a **backup / alternative** endpoint.
+
+| Property | Value |
+|----------|-------|
+| **Function** | `kongsigo-web` |
+| **Runtime** | Custom (Node.js CommonJS) |
+| **Memory** | 512 MB |
+| **CPU** | 0.35 vCPU |
+| **URL** | `https://kongsigo-web-xrnohqpdht.ap-southeast-1.fcapp.run/` |
+| **Entry** | `server.cjs` (CommonJS required — `package.json` has `"type": "module"`) |
+
+### ⚠️ Known Issues & Notes
+
+| Issue | Detail | Resolution |
+|-------|--------|------------|
+| `crypto.randomUUID()` | Fails over HTTP (requires Secure Context) | ✅ Fixed by HTTPS |
+| Node.js server.cjs | No systemd service, manual restart on reboot | Create systemd unit |
+| ECS files in `/root/` | Nginx needs `user root;` or `chmod 755 /root` | ✅ Configured |
+| FC body size | CLI `--body` too large for zip upload | Use Python SDK |
+| OSS | Returns `UserDisable` (403) — not activated | Use FC or ECS instead |
+
+### 💰 Cost Estimate (Hackathon)
+
+| Resource | Billing | Est. Monthly |
+|----------|---------|-------------|
+| **ECS** (t6-c1m1.large) | Pay-As-You-Go | ~$15 USD |
+| **EIP** (5 Mbps) | PayByTraffic | ~$3-5 USD |
+| **FC** (backup, idle) | Pay-Per-Invocation | ~$0 (minimal) |
+| **SSL** (Let's Encrypt) | Free | $0 |
+| **DNS** (nip.io) | Free | $0 |
+| **Total** | | **~$18-20 USD/mo** |
+
+---
+
 ## 🚀 Getting Started
 
 ### 1️⃣ Configure Environment
@@ -887,3 +1150,24 @@ All of these can be layered on top without touching the core engine.
 
 ---
 
+## 📝 Notes for Contributors
+
+1. **Money is `Decimal`, never float.** The serializer always emits 2-dp strings (`"1234.50"`) so the frontend doesn't deal with rounding.
+
+2. **DateTimes go out as ISO-8601 with `Z` suffix and millisecond precision** — matches Prisma's wire format. See `backend/app/serialize.py`.
+
+3. **All ledger writes happen inside one DB transaction.** `make_contribution`, `cast_vote`, and `execute_approved_spend` are the canonical examples. Copy the pattern when adding new ledger flows.
+
+4. **`metadata` is a reserved column name in SQLAlchemy** (clashes with `Base.metadata`). The model attribute is `metadata_` and the serializer emits it as `metadata` to keep the API stable. Don't rename it.
+
+5. **The TypeScript backend in `src/` was the original implementation.** The project has since been ported to Python and that's what runs. The TS code is preserved for reference.
+
+6. **Agent replies are always in English** — enforced by `BASE_SYSTEM` in `agent/prompts.py`.
+
+7. **DeepSeek `<think>` blocks are stripped** before reaching the user or being persisted. They stay in DEBUG logs only.
+
+8. **BOCPD detector cache is in-process only** — it reconverges in ~10 observations after a restart. Memory tables (Postgres) survive restarts.
+
+---
+
+*Built in ~13 hours for the TNG eWallet hackathon. ☕ Coffee was consumed. 😴 Sleep was not.*

@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
-import { Wallet, AlertCircle } from "lucide-react";
-import { useLogin } from "../api/hooks";
+import { Wallet, AlertCircle, QrCode } from "lucide-react";
+import { useLogin, useQrLogin } from "../api/hooks";
 
 const DEMO_USERS = [
   { phone: "+60112345001", name: "Ahmad", role: "Owner of both pools" },
@@ -13,11 +13,19 @@ export function LoginPage() {
   const [phone, setPhone] = useState("+60112345001");
   const [pin, setPin] = useState("123456");
   const login = useLogin();
+  const qrLogin = useQrLogin();
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
     login.mutate({ phone, pin });
   };
+
+  const handleQrLogin = () => {
+    qrLogin.mutate({ phone, pin });
+  };
+
+  const anyError = login.error ?? qrLogin.error;
+  const errorVisible = login.isError || qrLogin.isError;
 
   return (
     <div
@@ -102,7 +110,7 @@ export function LoginPage() {
             autoComplete="current-password"
           />
 
-          {login.isError && (
+          {errorVisible && (
             <div
               style={{
                 marginTop: 14,
@@ -117,13 +125,13 @@ export function LoginPage() {
               }}
             >
               <AlertCircle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
-              <span>{(login.error as Error)?.message ?? "Login failed"}</span>
+              <span>{(anyError as Error)?.message ?? "Login failed"}</span>
             </div>
           )}
 
           <button
             type="submit"
-            disabled={login.isPending}
+            disabled={login.isPending || qrLogin.isPending}
             style={{
               marginTop: 20,
               width: "100%",
@@ -139,6 +147,73 @@ export function LoginPage() {
           >
             {login.isPending ? "Signing in…" : "Sign in"}
           </button>
+
+          {/* QR steganographic sign-in (kiosk-style) */}
+          <div
+            style={{
+              marginTop: 16,
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              fontSize: 11,
+              color: "#94A3B8",
+              textTransform: "uppercase",
+              letterSpacing: 0.6,
+            }}
+          >
+            <div style={{ flex: 1, height: 1, background: "#E2E8F0" }} />
+            <span>or</span>
+            <div style={{ flex: 1, height: 1, background: "#E2E8F0" }} />
+          </div>
+          <button
+            type="button"
+            onClick={handleQrLogin}
+            disabled={login.isPending || qrLogin.isPending}
+            style={{
+              marginTop: 12,
+              width: "100%",
+              height: 44,
+              background: "#fff",
+              color: "#0055D6",
+              border: "1px solid #0055D6",
+              borderRadius: 10,
+              fontSize: 14,
+              fontWeight: 600,
+              cursor: qrLogin.isPending ? "wait" : "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 8,
+            }}
+          >
+            <QrCode size={18} />
+            {qrLogin.isPending ? "Generating + verifying QR…" : "Sign in with stega QR"}
+          </button>
+
+          {qrLogin.isSuccess && qrLogin.data && (
+            <div
+              style={{
+                marginTop: 12,
+                padding: 12,
+                background: "#F0F9FF",
+                border: "1px solid #BAE6FD",
+                borderRadius: 10,
+                fontSize: 12,
+                color: "#075985",
+              }}
+            >
+              <div style={{ fontWeight: 600, marginBottom: 6 }}>
+                ✓ Verified via steganographic QR
+              </div>
+              <div>visible: <code>{qrLogin.data.issued.visiblePayload}</code></div>
+              <div>hidden tag: <code>{qrLogin.data.issued.tag}</code> (HMAC-SHA256/4)</div>
+              <img
+                src={qrLogin.data.issued.image}
+                alt="stega QR"
+                style={{ width: 120, marginTop: 8, imageRendering: "pixelated" as const }}
+              />
+            </div>
+          )}
         </form>
       </div>
 

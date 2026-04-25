@@ -26,6 +26,48 @@ export function useLogin() {
   });
 }
 
+/**
+ * Two-step "Sign in with QR" demo:
+ *   1. POST /auth/qr-issue with phone+PIN -> server returns a stega-signed QR image
+ *      (visible payload binds to the user, hidden bits carry an HMAC + timestamp).
+ *   2. POST /auth/qr-login with that image -> server validates stega + 60s window,
+ *      issues fresh obfuscated access/refresh tokens.
+ *
+ * Returns the QR image bytes via `qrImage` so the UI can flash it briefly to
+ * prove the stega path actually ran.
+ */
+export interface QrIssueResult {
+  image: string;
+  visiblePayload: string;
+  issuedAt: number;
+  tag: string;
+  expiresInSeconds: number;
+}
+
+export function useQrLogin() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (vars: { phone: string; pin: string }) => {
+      const issued = await api<QrIssueResult>("/auth/qr-issue", {
+        method: "POST",
+        body: vars,
+        noAuth: true,
+      });
+      const auth = await api<AuthResult>("/auth/qr-login", {
+        method: "POST",
+        body: { image: issued.image },
+        noAuth: true,
+      });
+      return { issued, auth };
+    },
+    onSuccess: ({ auth }) => {
+      tokens.setSession(auth.accessToken, auth.refreshToken, auth.user);
+      qc.setQueryData(["me"], auth.user);
+      qc.invalidateQueries();
+    },
+  });
+}
+
 export function useLogout() {
   const qc = useQueryClient();
   return useMutation({

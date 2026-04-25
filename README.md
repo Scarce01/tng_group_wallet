@@ -1,134 +1,154 @@
-# TNG Group Wallet — Pool Engine
+# TNG Group Wallet
 
-Backend service for the **shared Pool Engine** that powers both Trip Wallets and Family Wallets in the TNG Group Wallet hackathon project.
+Shared **Pool Engine** that powers Trip Wallets and Family Wallets in the TNG Group Wallet hackathon project. Phone + 6-digit-PIN auth, atomic ledgered contributions and votes, real-time WebSocket fan-out, and a React/shadcn frontend.
 
-This slice is **backend only**. It exposes a REST API + WebSocket for real-time pool events.
+## Repo layout
 
-## What's in this slice
+```
+.
+├── backend/         Python FastAPI backend (canonical)
+│   └── app/
+│       ├── main.py              FastAPI app + lifespan + CORS + error handlers + SPA fallback
+│       ├── config.py            env loader (.env at repo root)
+│       ├── db.py                async SQLAlchemy engine; auto-disables prepared statements on Supabase pooler
+│       ├── models.py            11 SQLAlchemy models, mirrors the Prisma schema 1:1
+│       ├── enums.py             12 enums (PoolType, MemberRole, SpendStatus, …)
+│       ├── serialize.py         Prisma-shape JSON (Decimal -> "1.23", DateTime -> ISO Z, enums uppercase)
+│       ├── jwt_utils.py         python-jose access/refresh tokens
+│       ├── security.py          bcrypt cost-10 (interoperable with the old Node hashes)
+│       ├── auth_dep.py          FastAPI dep that pulls userId from Bearer token
+│       ├── pubsub.py            in-process EventBus or Redis pub/sub
+│       ├── publisher.py         fire-and-forget publish helpers used by HTTP routes
+│       ├── ws.py                FastAPI WebSocket; per-pool subscribe with membership check
+│       ├── rate_limit.py        in-memory window limiter on auth endpoints
+│       ├── errors.py            AppError hierarchy + Express-shape error envelope
+│       ├── cuid.py              25-char Prisma-compatible cuid generator
+│       ├── routes/              auth, users, pools, members, invites, contributions, spend, transactions, zk
+│       ├── schemas/             Pydantic v2 input validators (Zod-equivalent shapes)
+│       ├── services/            business logic — auth, pool, contribution, spend (incl. resolveVotingStatus), zk
+│       ├── seed.py              demo data — 4 users, 1 trip pool, 1 family pool
+│       └── bootstrap.py         drop-and-recreate public schema (one-time)
+├── web/             React 18 + Vite + Tailwind + shadcn/Radix UI + MUI frontend
+├── src/             OLD Node/TypeScript backend — kept for reference, not used at runtime
+├── prisma/          OLD Prisma schema + seed (kept so the TS backend in src/ still builds)
+├── public/          Legacy vanilla-HTML prototype (used as static fallback if web/dist isn't built)
+├── Dockerfile       (legacy — Node image; Python Dockerfile to be added)
+├── docker-compose.yml
+├── .env             local env (gitignored — see .env.example)
+└── .claude/launch.json   preview launchers used by the Claude Code preview tooling
+```
 
-| Module | Endpoints |
-|---|---|
-| Auth | register / login / refresh / logout (phone + 6-digit PIN, JWT access + rotating refresh) |
-| Users | profile, main wallet balance, top-up (demo), notifications, personal transactions |
-| Pools | create / list / detail / patch / archive / delete (TRIP and FAMILY) |
-| Members | add / list (with contributed totals) / patch role / leave / remove |
-| Invites | generate code, list pending, accept, decline |
-| Contributions | atomic deduct-from-wallet → credit-pool with double-entry ledger |
-| Spend Requests | create, list, detail with votes |
-| Voting | cast vote, automatic resolution (MAJORITY / UNANIMOUS / THRESHOLD / ADMIN_ONLY), expiry sweep |
-| Execution | execute approved spend → credit requester wallet |
-| Emergency | family-only emergency override skips voting |
-| Ledger | pool transactions, pool analytics (per-member net, spend by category, flow data) |
-| Real-time | WebSocket: subscribe to pool, receive `vote_cast`, `balance_updated`, `spend_request_resolved`, `member_*` events |
-
-What is **not** in this slice (intentionally scoped out):
-- Family-specific features: income streams, budget plans, scam shield, grant matching
-- Settlement calculation (trip pool dissolution payouts)
-- Admin dashboard endpoints
-- KYC document upload to S3
-- Mobile app (Flutter)
-
-These can be layered on top of this engine later.
+The **TypeScript backend in `src/`** was the original implementation; the project has since been ported to Python and that is what runs. The TS code is preserved in case anyone wants to compare or reuse it.
 
 ## Tech stack
 
-- **Node.js 20** + **TypeScript** (strict mode, `noUncheckedIndexedAccess`)
-- **Express 4**, **Zod** request validation
-- **Prisma 5** + **PostgreSQL 16** (all balance changes inside `$transaction`)
-- **Redis 7** for WebSocket pub/sub fan-out (multi-instance safe)
-- **ws** for the WebSocket server (Flutter-friendly)
-- **JWT** (rotating refresh tokens, hashed at rest)
-- **Helmet**, **CORS**, **express-rate-limit** on auth endpoints
-- **Winston** structured logging
+**Backend (Python)**
+- FastAPI, Uvicorn (asyncio)
+- SQLAlchemy 2.0 async + asyncpg
+- Pydantic v2 (request validation)
+- python-jose (JWT, HS256), passlib/bcrypt (PIN hash, cost 10)
+- redis-py (optional WebSocket pub/sub fan-out)
+- Native FastAPI WebSockets
 
-## Local development
+**Database**
+- PostgreSQL 17 hosted on **Supabase** (transaction pooler), or any local Postgres for offline dev
+- All balance changes inside a single SQLAlchemy transaction — pool/user balances cannot drift
 
-### 1. Prerequisites
+**Frontend (in `web/`)**
+- React 18 + Vite 6, TypeScript
+- shadcn/Radix UI + MUI for components
+- TanStack Query, React Router 7
+- Tailwind 4
 
-- Node 20+
-- Docker Desktop (for Postgres + Redis)
-- (optional) `psql` / `redis-cli` for inspection
+## Quick start
 
-### 2. Boot Postgres + Redis only
+### 1. Configure environment
 
 ```bash
 cp .env.example .env
-docker compose up -d postgres redis
+# Edit .env — most importantly DATABASE_URL.
 ```
 
-### 3. Install + migrate + seed
+For Supabase:
+```env
+DATABASE_URL=postgresql://postgres.<project-ref>:<URL-encoded-password>@aws-1-<region>.pooler.supabase.com:6543/postgres
+```
+Get this string from Supabase dashboard → **Connect → Direct → Transaction pooler**. Free-tier projects do **not** have IPv4 on the direct host, so the pooler is required.
+
+For local Postgres:
+```env
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/tng_pool
+```
+
+### 2. Install Python deps
 
 ```bash
-npm install
-npx prisma generate
-npx prisma migrate dev --name init
-npm run seed
+cd backend
+python -m pip install -r requirements.txt
 ```
 
-Seed creates 4 users (PIN = `123456`), 2 pools (1 trip, 1 family) with contributions and a pending spend request.
+### 3. Create schema + seed demo data
+
+```bash
+# From repo root or backend/
+python -m app.bootstrap     # DROP+CREATE schema public, then create_all()
+python -m app.seed          # 4 users, 2 pools, contributions, votes, ZK-verified Ahmad
+```
+
+Demo accounts (PIN `123456` for all):
+
+| Phone | Name | Role |
+|---|---|---|
+| `+60112345001` | Ahmad | owner of both pools |
+| `+60112345002` | Siti | family pool admin |
+| `+60112345003` | Raj | trip pool member |
+| `+60112345004` | Mei | trip pool member |
 
 ### 4. Run the API
 
 ```bash
-npm run dev      # tsx watch
-# or
-npm run build && npm start
+cd backend
+python -m uvicorn app.main:app --host 0.0.0.0 --port 4000 --reload
 ```
 
 API: `http://localhost:4000/api/v1`
 WebSocket: `ws://localhost:4000/ws?token=<accessToken>`
+OpenAPI docs: `http://localhost:4000/docs`
 
-### 5. Smoke test
+### 5. Run the frontend
 
 ```bash
-# Login as Ahmad (seeded)
-curl -s -X POST http://localhost:4000/api/v1/auth/login \
-  -H 'content-type: application/json' \
-  -d '{"phone":"+60112345001","pin":"123456"}' | jq
+cd web
+npm install
+npm run dev
+```
 
-# Save the accessToken, then list pools
+Visit `http://localhost:5173`. The Vite dev server proxies `/api` and `/ws` to the FastAPI backend on `:4000`, so you can hot-reload UI without touching the API.
+
+### 6. Smoke test the API
+
+```bash
+# Login as Ahmad
+TOKEN=$(curl -s -X POST http://localhost:4000/api/v1/auth/login \
+  -H 'content-type: application/json' \
+  -d '{"phone":"+60112345001","pin":"123456"}' | jq -r .accessToken)
+
+# List pools
 curl -s http://localhost:4000/api/v1/pools \
   -H "authorization: Bearer $TOKEN" | jq
 ```
 
-### 6. Full stack with Docker
-
-```bash
-docker compose up --build
-```
-
-Brings up `postgres`, `redis`, and `api` (which runs `prisma migrate deploy` then starts the server). The API container does **not** seed — run `npm run seed` against the dockerized DB if you want demo data.
-
-## Project layout
-
-```
-src/
-├── app.ts                  Express wiring
-├── index.ts                HTTP + WebSocket boot, graceful shutdown
-├── config/env.ts           Zod-validated environment
-├── lib/                    prisma, redis, logger
-├── middleware/             auth, error handler, validate
-├── schemas/                Zod request schemas
-├── services/               Business logic (pure where possible — see resolveVotingStatus)
-├── routes/                 Express routers
-├── utils/                  jwt, errors, async wrapper
-└── websocket/              ws server + Redis pub/sub publisher
-prisma/
-├── schema.prisma           Pool Engine subset of the full hackathon schema
-└── seed.ts                 Demo data
-```
-
 ## Voting engine
 
-`resolveVotingStatus` in [`src/services/spend.service.ts`](src/services/spend.service.ts) is a pure function — given pool config + active member count + current votes, it returns `APPROVED` / `REJECTED` / `PENDING`. The service runs it inside the same transaction as the vote insert, so vote casting and resolution are atomic.
+`resolve_voting_status` in [`backend/app/services/spend_service.py`](backend/app/services/spend_service.py) is a pure function — given the pool config, eligible-member count, and current votes, it returns `APPROVED` / `REJECTED` / `PENDING`. It runs inside the same DB transaction as the vote insert, so vote casting and resolution are atomic.
 
 Resolution rules:
-- `MAJORITY` → ≥ 51% of (members − abstentions) approved
-- `UNANIMOUS` → 100% approved
+- `MAJORITY` → ≥ 51 % of (members − abstentions) approved
+- `UNANIMOUS` → 100 % approved
 - `THRESHOLD` → ≥ `approvalThreshold` approved
 - `ADMIN_ONLY` → owner's vote decides
-- `REJECTED` early if remaining unvoted members can no longer reach the threshold
-- `EXPIRED` swept by a 60s background timer (`expireStaleRequests`)
+- Early `REJECTED` once remaining unvoted members can no longer reach the threshold
+- `EXPIRED` swept by a 60 s background task (`expire_stale_requests`)
 
 Emergency override (FAMILY pools with `emergencyOverride=true`) creates the request as `APPROVED` immediately and skips voting.
 
@@ -140,7 +160,7 @@ Connect to `ws://host/ws?token=<accessToken>`. The server auto-subscribes you to
 { "action": "subscribe", "poolId": "clx..." }
 ```
 
-Events emitted:
+Events:
 
 | Event | Channel | Trigger |
 |---|---|---|
@@ -149,48 +169,13 @@ Events emitted:
 | `balance_updated` | pool | contribution or spend execution |
 | `spend_request_created` | pool | new spend request |
 | `vote_cast` | pool | any vote, includes new `resolution` |
-| `spend_request_resolved` | user | only sent to requester when their request flips |
+| `spend_request_resolved` | user | sent to requester when their request flips |
 | `spend_request_cancelled` | pool | requester cancelled |
-| `member_added`/`updated`/`left`/`removed`/`joined` | pool | membership changes |
+| `member_added` / `updated` / `left` / `removed` / `joined` | pool | membership changes |
 
-WebSocket fan-out goes through Redis pub/sub, so you can scale the API horizontally on ECS Fargate without losing events across replicas.
+Fan-out is in-process by default; set `REDIS_URL` to switch to Redis pub/sub so you can horizontally scale the API.
 
-## AWS deployment (ECS Fargate + RDS + ElastiCache)
-
-The `Dockerfile` produces a non-root, multi-stage runtime image with `tini` as PID 1 and a built-in `HEALTHCHECK` against `/api/v1/health`. Terraform isn't included in this slice, but the deploy contract is:
-
-1. **Push image** to ECR
-   ```bash
-   aws ecr get-login-password --region ap-southeast-1 | \
-     docker login --username AWS --password-stdin <acct>.dkr.ecr.ap-southeast-1.amazonaws.com
-   docker build -t tng-pool-api .
-   docker tag tng-pool-api:latest <acct>.dkr.ecr.ap-southeast-1.amazonaws.com/tng-pool-api:latest
-   docker push <acct>.dkr.ecr.ap-southeast-1.amazonaws.com/tng-pool-api:latest
-   ```
-
-2. **Provision** (Terraform-shaped):
-   - VPC with 2 public + 2 private subnets across AZs
-   - **RDS PostgreSQL 16** in private subnets (Multi-AZ for prod), security group allows 5432 from ECS SG
-   - **ElastiCache Redis 7** in private subnets, security group allows 6379 from ECS SG
-   - **ECR** repository `tng-pool-api`
-   - **ECS Cluster** + Fargate **Service** running 2+ tasks of the image
-   - **ALB** in public subnets, target group on port 4000
-   - **ALB listener** on 443 (ACM cert) → forward to target group
-   - **WebSocket support**: ALB target group needs `stickiness.enabled = true` (or use ALB-native sticky-cookie); WebSocket upgrades work out of the box on ALB.
-
-3. **Task environment** (via Secrets Manager / SSM Parameter Store, not env files):
-   - `DATABASE_URL` → RDS endpoint
-   - `REDIS_URL` → ElastiCache primary endpoint
-   - `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET` → 32+ byte random strings
-   - `CORS_ORIGINS` → comma-separated list (e.g. mobile build origin, admin domain)
-   - `NODE_ENV=production`
-   - `PORT=4000`
-
-4. **Migrations on deploy** — easiest path: pre-deploy ECS task that runs `npx prisma migrate deploy` against the same DB. Don't bake `prisma migrate dev` into the runtime image.
-
-5. **Health check** — ALB target group should hit `GET /api/v1/health` (ECS task already declares it for container health).
-
-## Tested API surface
+## API surface
 
 ```
 POST   /api/v1/auth/register
@@ -238,5 +223,44 @@ POST   /api/v1/pools/:id/spend-requests/:sid/execute
 GET    /api/v1/pools/:id/transactions
 GET    /api/v1/pools/:id/analytics
 
+GET    /api/v1/pools/:id/zk/params
+POST   /api/v1/pools/:id/zk/prove
+POST   /api/v1/pools/:id/zk/verify
+GET    /api/v1/pools/:id/zk/status
+
 GET    /api/v1/health
 ```
+
+## Cloud deploy (any host that runs Python + can reach Supabase)
+
+The backend is a stock FastAPI + Uvicorn app, so it deploys identically to **Render**, **Fly.io**, **Railway**, or **AWS App Runner / ECS Fargate**. Whichever you pick:
+
+1. Build the container or push the repo.
+2. Set environment variables — same names as `.env`:
+   - `DATABASE_URL` → Supabase **transaction pooler** URI
+   - `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET` → ≥ 32-byte random strings (don't reuse the dev defaults)
+   - `CORS_ORIGINS` → comma-separated list of frontend origins
+   - `NODE_ENV=production`
+   - `PORT=4000` (or whatever the platform sets — uvicorn binds to `--port`)
+   - `REDIS_URL` → only if running > 1 replica and you want shared WebSocket fan-out
+3. Start command: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+4. Health check: `GET /api/v1/health` returns `{"status":"ok",...}`.
+
+The Supabase pooler runs PgBouncer in transaction mode; `backend/app/db.py` auto-detects `*.pooler.supabase.com` / port `6543` and disables asyncpg prepared statements + JIT. No manual flags required.
+
+## What's intentionally NOT in this slice
+
+- Family-specific features beyond the engine: income streams, budget plans, scam shield, grant matching
+- Settlement calculation (trip-pool dissolution payouts)
+- Admin dashboard endpoints
+- KYC document upload to S3
+- Mobile (Flutter) app — the React app in `web/` is the reference UI
+
+These can be layered on top without touching the engine.
+
+## Notes for contributors
+
+- **Money is `Decimal`**, never float. The serializer always emits 2-dp strings (`"1234.50"`) so the frontend doesn't have to deal with rounding.
+- **DateTimes go out as ISO-8601 with `Z`** suffix and millisecond precision (matches Prisma's wire format) — see `backend/app/serialize.py`.
+- **All ledger writes happen inside one DB transaction.** `make_contribution`, `cast_vote`, and `execute_approved_spend` are the canonical examples — copy the pattern when adding new ledger flows.
+- **`metadata` is a reserved column name** in SQLAlchemy (clashes with `Base.metadata`); the model attribute is `metadata_` and the serializer emits it as `metadata` to keep the API stable. Don't rename it.

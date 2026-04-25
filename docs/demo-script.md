@@ -1,72 +1,78 @@
 # KongsiGo — 1-Minute Demo Script
-## System Security Architecture + AWS Device-Bind + Alibaba Cloud Hosting
+## Flow: Security Architecture → AWS Device-Bind → Alibaba Cloud Hosting
 
 > **Total time: ~60 seconds. Speak at a natural pace. Each section is ~20s.**
+> **Flow order: Security first → AWS implementation → Alibaba hosting**
 
 ---
 
-### 🎬 PART 1 — Multi-Cloud Architecture Overview (0:00 – 0:20)
+### 🎬 PART 1 — Security Architecture (0:00 – 0:20)
 
-> *[Show: System Architecture diagram]*
+> *[Show: Security Architecture diagram — Threat Sources → Detection → Monitoring → Alerts → SOC]*
 
-"KongsiGo is a **group wallet** for families and friends — built on a **multi-cloud architecture** across **Alibaba Cloud** and **AWS**, both hosted in the **Singapore region** for low-latency access in Southeast Asia.
+"KongsiGo is a **group wallet** for families — and security is our foundation. Let me walk you through our **threat detection and response** pipeline.
 
-The **frontend** — a React progressive web app — is hosted on **Alibaba Cloud ECS** with **Nginx** handling SSL termination via **Let's Encrypt**, and a Node.js server serving the SPA and proxying API calls.
+On the left, we defend against four threat types: **forged signatures**, **replay attacks**, **untrusted devices**, and **bot abuse**.
 
-All **backend logic** — pool management, contributions, payments, and our passwordless authentication — runs on **AWS** with **FastAPI on EC2**, connected to a **Supabase PostgreSQL** database."
+Each threat passes through our **Detection Layer** — **HMAC signature verification**, **DynamoDB nonce protection** to block replays, **device fingerprint matching**, and **IP threat intelligence** via geo and ISP lookups.
 
----
-
-### 🎬 PART 2 — AWS Device-Bind Security (0:20 – 0:40)
-
-> *[Show: Device-Bind AWS Architecture diagram]*
-
-"For authentication, we use a **passwordless device-bind** flow — no passwords at all.
-
-Here's how it works: the user enters their phone number, and our backend creates a **challenge**. The **TNG eWallet app** picks up this challenge and signs it with **HMAC-SHA256**.
-
-This signed approval goes through our **AWS Lambda gate** — which performs a **6-point verification**: it checks the challenge exists, hasn't expired, matches the device fingerprint, verifies the HMAC signature using **constant-time comparison**, and does a **DynamoDB conditional put** to prevent **replay attacks**.
-
-Every request is logged with **source IP** and **device fingerprint** for forensic tracing."
+Every event emits **CloudWatch metrics and structured JSON logs**. If we see **5 bad signatures in 5 minutes** or **any single replay attempt**, **CloudWatch Alarms** fire instantly — pushing **SNS notifications** to our team via email. All evidence feeds into our **SOC forensics dashboard** for incident investigation."
 
 ---
 
-### 🎬 PART 3 — Security Monitoring & Alibaba Hosting (0:40 – 1:00)
+### 🎬 PART 2 — AWS Device-Bind Implementation (0:20 – 0:40)
 
-> *[Show: Security Architecture diagram]*
+> *[Show: Device-Bind AWS Architecture diagram — the full Lambda → DynamoDB → EC2 flow]*
 
-"On the security monitoring side, we have a **four-layer defense**:
+"Now let me show you **how we implemented this** on AWS.
 
-**Detection** — signature verification, nonce-based replay protection, device fingerprint matching, and IP threat intelligence.
+Our authentication is **completely passwordless** — we use a **device-bind** flow. The user enters their phone number on the web app, and our **FastAPI backend on EC2** creates a challenge.
 
-**Monitoring** — all events emit **CloudWatch metrics** — BadSignature, ReplayDetected — with structured JSON logs.
+The **TNG eWallet app** picks up this challenge, signs it with **HMAC-SHA256**, and sends approval to our **AWS Lambda gate**.
 
-**Alerts** — CloudWatch alarms trigger if we see **5 bad signatures in 5 minutes** or **any replay attempt**, sending instant **SNS email notifications**.
+The Lambda performs a **6-point verification**: ① fetch the pending challenge, ② check it exists, ③ confirm it hasn't expired within the 120-second window, ④ match the device fingerprint, ⑤ verify the HMAC signature using **constant-time comparison**, and ⑥ do a **DynamoDB conditional put** — if the nonce was already used, the request is **rejected as a replay**.
 
-**SOC Forensics** — we can query CloudWatch Logs Insights by IP, geo-location, ISP, and user agent for incident investigation.
+Once verified, the Lambda forwards the approval to EC2, which issues **JWT tokens** back to the browser."
 
-The entire frontend is served over **HTTPS** from Alibaba Cloud with a backup deployment on **Alibaba Function Compute** for high availability. Thank you."
+---
+
+### 🎬 PART 3 — Alibaba Cloud Web Hosting (0:40 – 1:00)
+
+> *[Show: Alibaba Cloud Architecture diagram — ECS + Nginx + Node.js + FC backup]*
+
+"For the **frontend delivery**, we chose **Alibaba Cloud** — also in the **Singapore region** — giving our Malaysian users **sub-150ms latency**.
+
+Our React SPA is hosted on an **Alibaba ECS instance** running **Ubuntu 22.04**. **Nginx** handles **SSL termination** with a **Let's Encrypt certificate** and auto-redirects HTTP to HTTPS — this is critical because our device ID generation requires a **Secure Context**.
+
+Behind Nginx, a **Node.js server** serves the static build files and **proxies all `/api/*` requests** across to our **AWS EC2 backend** — bridging the two clouds seamlessly.
+
+For **high availability**, we also maintain a backup deployment on **Alibaba Function Compute**, ready to take over if the ECS instance goes down.
+
+The entire Alibaba infrastructure — VPC, security groups, EIP — runs at just **under $20 a month**. Thank you."
 
 ---
 
 ## 📝 Key Talking Points (cheat sheet)
 
-| Topic | Sound Bite |
-|-------|-----------|
-| **Multi-cloud** | "Alibaba Cloud frontend + AWS backend, both Singapore region" |
-| **Passwordless** | "No passwords — device-bind with HMAC-SHA256 challenge-response" |
-| **Anti-replay** | "DynamoDB conditional put — each nonce can only be used once" |
-| **6-point check** | "Challenge exists, not expired, device match, HMAC verify, constant-time, replay guard" |
-| **Real-time alerts** | "CloudWatch alarms → SNS email within seconds" |
-| **Forensics** | "Source IP, geo, ISP, device fingerprint — all logged for SOC" |
-| **HTTPS** | "Let's Encrypt SSL on Alibaba ECS — auto-renew" |
-| **HA backup** | "Function Compute on Alibaba as fallback" |
-| **Cost** | "Under $20/month total on Alibaba side" |
+| # | Topic | Sound Bite |
+|---|-------|-----------|
+| 1 | **4 threats** | "Bad signatures, replay attacks, device mismatch, bot abuse" |
+| 2 | **Detection layer** | "HMAC verify, nonce protection, device fingerprint, IP intelligence" |
+| 3 | **Real-time alerts** | "CloudWatch alarms → SNS email in seconds" |
+| 4 | **SOC forensics** | "Query by IP, geo, ISP, user agent for investigation" |
+| 5 | **Passwordless** | "No passwords — device-bind with HMAC-SHA256 challenge-response" |
+| 6 | **6-point check** | "Exists, not expired, device match, HMAC verify, constant-time, replay guard" |
+| 7 | **Anti-replay** | "DynamoDB conditional put — each nonce used exactly once, TTL 24h" |
+| 8 | **Multi-cloud** | "Alibaba frontend + AWS backend, both Singapore ap-southeast-1" |
+| 9 | **HTTPS required** | "crypto.randomUUID() needs Secure Context — Let's Encrypt solves it" |
+| 10 | **HA backup** | "Function Compute on Alibaba as serverless fallback" |
 
 ---
 
-## 🖥️ Slides to Show
+## 🖥️ Slides to Show (in order)
 
-1. **0:00** — Full system architecture diagram (Alibaba + AWS + Supabase)
-2. **0:20** — Device-bind AWS architecture (Lambda → DynamoDB → EC2 flow)
-3. **0:40** — Security architecture (Threat Sources → Detection → Monitoring → Alerts → SOC)
+| Time | Slide | Diagram |
+|------|-------|---------|
+| **0:00** | Security Architecture | Threat Sources → Detection → Monitoring → Alerts → SOC |
+| **0:20** | AWS Device-Bind | Lambda 6-point verification → DynamoDB → EC2 → JWT |
+| **0:40** | Alibaba Cloud Hosting | ECS + Nginx + Node.js → AWS proxy + FC backup |

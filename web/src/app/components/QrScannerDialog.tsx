@@ -1,6 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { useAcceptQrInvite } from '../../api/hooks';
-import { Camera, CheckCircle2, XCircle, Aperture } from 'lucide-react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { api } from '../../api/client';
+import jsQR from 'jsqr';
+import { Camera, CheckCircle2, XCircle } from 'lucide-react';
+
+const QR_PAYLOAD_PREFIX = 'POOL_INVITE:';
 
 type ScanState = 'requesting' | 'streaming' | 'capturing' | 'success' | 'error';
 
@@ -10,15 +14,32 @@ interface QrScannerDialogProps {
 }
 
 export function QrScannerDialog({ open, onOpenChange }: QrScannerDialogProps) {
-  const accept = useAcceptQrInvite();
+  const qc = useQueryClient();
+  const accept = useMutation({
+    mutationFn: (code: string) =>
+      api<{ poolId: string; userId: string; role: string }>(
+        `/invites/${encodeURIComponent(code)}/accept`,
+        { method: 'POST' },
+      ),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['pools'] });
+    },
+  });
+
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const scanTimerRef = useRef<number | null>(null);
   const [state, setState] = useState<ScanState>('requesting');
   const [cameraError, setCameraError] = useState<string | null>(null);
+  const [scanError, setScanError] = useState<string | null>(null);
   const [resultData, setResultData] = useState<{ poolId: string; role: string } | null>(null);
 
   const stopCamera = useCallback(() => {
+    if (scanTimerRef.current) {
+      clearInterval(scanTimerRef.current);
+      scanTimerRef.current = null;
+    }
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
@@ -31,6 +52,7 @@ export function QrScannerDialog({ open, onOpenChange }: QrScannerDialogProps) {
       stopCamera();
       setState('requesting');
       setCameraError(null);
+      setScanError(null);
       setResultData(null);
       accept.reset();
       return;
@@ -68,36 +90,72 @@ export function QrScannerDialog({ open, onOpenChange }: QrScannerDialogProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  const handleCapture = useCallback(() => {
-    const video = videoRef.current;
-    const canvas = canvasRef.current;
-    if (!video || !canvas) return;
+  // Auto-scan: continuously decode QR from camera frames
+  useEffect(() => {
+    if (state !== 'streaming') return;
 
-    const size = Math.min(video.videoWidth, video.videoHeight);
-    canvas.width = size;
-    canvas.height = size;
-    const ctx = canvas.getContext('2d')!;
-    // Center-crop to square
-    const sx = (video.videoWidth - size) / 2;
-    const sy = (video.videoHeight - size) / 2;
-    ctx.drawImage(video, sx, sy, size, size, 0, 0, size, size);
-    const dataUrl = canvas.toDataURL('image/png');
+    let busy = false;
+    const interval = window.setInterval(() => {
+      if (busy) return;
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
+      if (!video || !canvas || video.readyState < 2) return;
 
-    setState('capturing');
-    accept.mutate(
-      { image: dataUrl },
-      {
+      const w = video.videoWidth;
+      const h = video.videoHeight;
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d')!;
+      ctx.drawImage(video, 0, 0, w, h);
+      const imageData = ctx.getImageData(0, 0, w, h);
+      const qr = jsQR(imageData.data, w, h, { inversionAttempts: 'dontInvert' });
+
+      if (!qr || !qr.data) return;
+      const payload = qr.data;
+
+      if (!payload.startsWith(QR_PAYLOAD_PREFIX)) {
+        setScanError('Not a valid pool invite QR');
+        return;
+      }
+
+      // Parse POOL_INVITE:{poolId}:{inviteCode}
+      const remainder = payload.slice(QR_PAYLOAD_PREFIX.length);
+      const colonIdx = remainder.indexOf(':');
+      if (colonIdx < 1) {
+        setScanError('Invalid QR format');
+        return;
+      }
+      const inviteCode = remainder.slice(colonIdx + 1);
+      if (!inviteCode) {
+        setScanError('Missing invite code');
+        return;
+      }
+
+      // Found valid QR — stop scanning, accept invite
+      busy = true;
+      setState('capturing');
+      setScanError(null);
+      accept.mutate(inviteCode, {
         onSuccess: (data) => {
           setResultData({ poolId: data.poolId, role: data.role });
           setState('success');
           stopCamera();
         },
-        onError: () => {
+        onError: (err) => {
+          setScanError((err as Error)?.message || 'Failed to join');
           setState('streaming');
+          busy = false;
         },
-      },
-    );
-  }, [accept, stopCamera]);
+      });
+    }, 300); // scan every 300ms
+
+    scanTimerRef.current = interval;
+    return () => {
+      clearInterval(interval);
+      scanTimerRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state]);
 
   if (!open) return null;
 
@@ -234,14 +292,14 @@ export function QrScannerDialog({ open, onOpenChange }: QrScannerDialogProps) {
           )}
 
           {/* Capture error overlay */}
-          {state === 'streaming' && accept.isError && (
+          {state === 'streaming' && scanError && (
             <div style={{
               position: 'absolute', bottom: 100, left: 20, right: 20, zIndex: 3,
               background: 'rgba(220,38,38,0.9)', borderRadius: 14,
               padding: '12px 16px', textAlign: 'center',
             }}>
               <p style={{ color: '#fff', fontSize: 13, fontWeight: 600, margin: 0 }}>
-                {(accept.error as Error)?.message || 'Invalid or expired QR code'}
+                {scanError}
               </p>
               <p style={{ color: 'rgba(255,255,255,0.7)', fontSize: 12, margin: '4px 0 0' }}>
                 Try again or ask for a new invite
@@ -257,23 +315,20 @@ export function QrScannerDialog({ open, onOpenChange }: QrScannerDialogProps) {
           zIndex: 2,
         }}>
           {state === 'streaming' && (
-            <>
-              <button
-                onClick={handleCapture}
-                style={{
-                  width: '100%', height: 52, borderRadius: 999,
-                  background: '#005AFF', border: 'none',
-                  fontSize: 15, fontWeight: 700, color: '#fff',
-                  cursor: 'pointer', fontFamily: 'Inter, sans-serif',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-                  boxShadow: '0 4px 16px rgba(0,90,255,0.3)',
-                }}
-              >
-                <Aperture size={18} strokeWidth={2.2} />
-                Capture & Verify
-              </button>
+             <>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{
+                  width: 10, height: 10, borderRadius: '50%',
+                  background: '#16A34A',
+                  animation: 'pulse-dot 1.5s ease-in-out infinite',
+                }} />
+                <style>{`@keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }`}</style>
+                <p style={{ color: 'rgba(255,255,255,0.8)', fontSize: 14, fontWeight: 600, margin: 0 }}>
+                  Scanning…
+                </p>
+              </div>
               <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: 12, margin: 0 }}>
-                Point at the QR invite code, then tap to verify
+                Point at the QR invite code — auto-detects
               </p>
             </>
           )}

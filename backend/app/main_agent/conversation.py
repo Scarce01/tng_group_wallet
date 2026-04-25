@@ -120,7 +120,11 @@ async def _get_or_create_conversation(session: AsyncSession, user_id: str) -> Ag
 
 
 def _parse_llm_json(raw: str) -> dict[str, Any]:
-    """LLMs sometimes wrap JSON in code fences or chatter — try to recover."""
+    """LLMs sometimes wrap JSON in code fences or chatter — try to recover.
+
+    Always returns a dict with a clean `message` field — never lets raw
+    JSON-looking fragments (`"toolCalls":[{`, etc.) leak into the UI.
+    """
     txt = (raw or "").strip()
     # Strip markdown fences
     if txt.startswith("```"):
@@ -133,11 +137,22 @@ def _parse_llm_json(raw: str) -> dict[str, Any]:
     if start >= 0 and end > start:
         candidate = txt[start:end + 1]
         try:
-            return json.loads(candidate)
+            parsed = json.loads(candidate)
+            if isinstance(parsed, dict):
+                # Sanitise: ensure message is a clean string, never JSON fragments
+                msg = parsed.get("message", "")
+                if not isinstance(msg, str):
+                    parsed["message"] = json.dumps(msg)
+                return parsed
         except Exception:
             pass
-    # Fallback: raw text becomes the message
-    return {"message": raw or "(no reply)"}
+    # Fallback: best-effort — strip anything that looks like JSON syntax to
+    # avoid leaking `"toolCalls":[{` and similar fragments to the user.
+    cleaned = (raw or "").strip()
+    if any(token in cleaned for token in ('"toolCalls"', '"widgets"', '"message":', "{", "}", "[")):
+        # Looks like broken JSON — show a generic message instead of fragments
+        return {"message": "Sorry, I had trouble formatting that. Could you rephrase?"}
+    return {"message": cleaned or "(no reply)"}
 
 
 async def handle_message(session: AsyncSession, user_id: str, user_message: str) -> dict[str, Any]:

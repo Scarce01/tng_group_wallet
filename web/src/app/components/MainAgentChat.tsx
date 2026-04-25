@@ -17,7 +17,7 @@ import {
   type MainAgentMessage,
   type MainAgentWidget,
 } from '../../api/hooks';
-import { AiAdvisorIcon } from './AiAdvisorIcon';
+import { MainAgentIcon } from './MainAgentIcon';
 
 interface MainAgentChatProps {
   open: boolean;
@@ -94,8 +94,8 @@ export function MainAgentChat({ open, onClose }: MainAgentChatProps) {
           <X size={16} color="#4B5563" />
         </button>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <div style={{ width: 28, height: 28 }}>
-            <AiAdvisorIcon size={28} withPapers={false} />
+          <div style={{ width: 32, height: 32 }}>
+            <MainAgentIcon size={32} withBackgroundFx={false} />
           </div>
           <span style={{ fontSize: 16, fontWeight: 700, color: '#0A0A0A' }}>Agent</span>
         </div>

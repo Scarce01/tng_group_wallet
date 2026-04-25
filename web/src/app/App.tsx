@@ -8,6 +8,7 @@ import type {
 } from '../api/client';
 import { CreatePoolDialog } from './components/CreatePoolDialog';
 import { MainAgentChat } from './components/MainAgentChat';
+import { MainAgentIcon } from './components/MainAgentIcon';
 import { NewSpendingRequestDialog } from './components/NewSpendingRequestDialog';
 import { TransactionDetailDialog } from './components/TransactionDetailDialog';
 import { ManageMembersDialog } from './components/ManageMembersDialog';
@@ -585,11 +586,11 @@ export default function App() {
                         <button
                           onClick={() => setShowMainAgent(true)}
                           className="w-10 h-10 rounded-full flex items-center justify-center relative"
-                          style={{ background: '#FFFFFF', boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}
+                          style={{ background: '#FFFFFF', boxShadow: '0 2px 8px rgba(0,0,0,0.08)', overflow: 'visible' }}
                           aria-label="Open AI assistant"
                         >
-                          <Sparkles className="w-5 h-5" style={{ color: '#005AFF' }} />
-                          <span className="absolute top-2 right-2 w-2 h-2 rounded-full" style={{ background: '#005AFF' }} />
+                          <MainAgentIcon size={36} />
+                          <span className="absolute top-1 right-1 w-2 h-2 rounded-full" style={{ background: '#005AFF' }} />
                         </button>
                       </div>
                     </div>

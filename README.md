@@ -1,37 +1,57 @@
-# TNG Group Wallet — KongsiGo
+# 🏦 TNG Group Wallet — KongsiGo
 
-> A shared-wallet engine built for the Touch 'n Go eWallet hackathon. Trip Wallets. Family Wallets. Phone + PIN auth, device-bound passwordless login, atomic ledgered contributions, democratic spend voting, real-time WebSocket sync, AI-powered financial agents, and a React/shadcn frontend — all backed by FastAPI and PostgreSQL.
+> 🚀 A shared-wallet engine built for the Touch 'n Go eWallet hackathon. Trip Wallets. Family Wallets. Phone + PIN auth, device-bound passwordless login, atomic ledgered contributions, democratic spend voting, real-time WebSocket sync, AI-powered financial agents, and a React/shadcn frontend — all backed by FastAPI and PostgreSQL.
+
+<p align="center">
+
+**`🐍 Python/FastAPI`** · **`⚛️ React 18`** · **`🗄️ PostgreSQL`** · **`🤖 Claude + Ollama AI`** · **`🧠 DistilBERT + Isolation Forest`** · **`☁️ AWS Lambda`** · **`📱 Flutter`**
+
+</p>
+
+### ✨ Highlights at a Glance
+
+| | Feature | What Makes It Special |
+|---|---------|----------------------|
+| 🔐 | **Device-Bind Passwordless Auth** | HMAC-sealed challenges + AWS Lambda 6-check verification + DynamoDB replay protection. Zero passwords. |
+| 💸 | **Atomic Ledgered Wallets** | Every ringgit tracked in double-entry. Pool/user balances wrapped in a single DB transaction — they literally cannot drift. |
+| 🗳️ | **Democratic Spend Voting** | 4 strategies (Majority, Unanimous, Threshold, Admin-Only) with early rejection and emergency override. |
+| 🤖 | **Dual AI Agents (27 tools)** | Pool Agent (per-pool financial brain) + Main Agent (MCP-style personal assistant). Claude → Ollama → rule fallback. |
+| 🧠 | **On-Device ML Pipeline** | DistilBERT tx classifier + Isolation Forest anomaly detector + BOCPD changepoint — all ONNX, <10ms inference. |
+| 📡 | **Real-Time WebSocket Sync** | Per-pool event fan-out with Redis pub/sub option for horizontal scaling. |
+| 💳 | **TNG-Gated QR Payments** | Scan → HMAC sign → Lambda verify → atomic debit. IP geolocation + CloudWatch alarms on suspicious activity. |
+| 🔗 | **Steganographic QR Invites** | Pool invitation codes embedded in QR images via steganography. |
+| 🛡️ | **50+ REST Endpoints** | Full CRUD for pools, members, contributions, spend requests, votes, transactions, agents, payments, ZK proofs. |
 
 ---
 
 ## Table of Contents
 
-- [What Is This?](#what-is-this)
-- [How It Works (In Plain English)](#how-it-works-in-plain-english)
-- [Architecture Overview](#architecture-overview)
-- [Repository Structure](#repository-structure)
-- [Tech Stack](#tech-stack)
-- [Backend Deep Dive](#backend-deep-dive)
-- [Frontend Deep Dive](#frontend-deep-dive)
-- [AI Agent System](#ai-agent-system)
-- [Machine Learning Pipeline](#machine-learning-pipeline)
-- [Device-Bind Passwordless Login](#device-bind-passwordless-login)
-- [Secure Payment Approval](#secure-payment-approval)
-- [Voting Engine](#voting-engine)
-- [Real-Time Events (WebSocket)](#real-time-events-websocket)
-- [Full API Surface](#full-api-surface)
-- [Database Schema](#database-schema)
-- [AWS Infrastructure](#aws-infrastructure)
-- [Getting Started](#getting-started)
-- [Demo Accounts](#demo-accounts)
-- [Deployment](#deployment)
-- [What's Not In This Slice](#whats-not-in-this-slice)
-- [Notes for Contributors](#notes-for-contributors)
-- [Contributors](#contributors)
+- [💡 What Is This?](#-what-is-this)
+- [🔄 How It Works (In Plain English)](#-how-it-works-in-plain-english)
+- [🏗️ Architecture Overview](#️-architecture-overview)
+- [📂 Repository Structure](#-repository-structure)
+- [⚙️ Tech Stack](#️-tech-stack)
+- [🐍 Backend Deep Dive](#-backend-deep-dive)
+- [⚛️ Frontend Deep Dive](#️-frontend-deep-dive)
+- [🤖 AI Agent System](#-ai-agent-system)
+- [🧠 Machine Learning Pipeline](#-machine-learning-pipeline)
+- [🔐 Device-Bind Passwordless Login](#-device-bind-passwordless-login)
+- [💳 Secure Payment Approval](#-secure-payment-approval)
+- [🗳️ Voting Engine](#️-voting-engine)
+- [⚡ Real-Time Events (WebSocket)](#-real-time-events-websocket)
+- [📡 Full API Surface](#-full-api-surface)
+- [🗄️ Database Schema](#️-database-schema)
+- [☁️ AWS Infrastructure](#️-aws-infrastructure)
+- [🚀 Getting Started](#-getting-started)
+- [👤 Demo Accounts](#-demo-accounts)
+- [📦 Deployment](#-deployment)
+- [🚧 What's Not In This Slice](#-whats-not-in-this-slice)
+- [📝 Notes for Contributors](#-notes-for-contributors)
+- [👥 Contributors](#-contributors)
 
 ---
 
-## What Is This?
+## 💡 What Is This?
 
 KongsiGo (from Malay "kongsi" — to share) is a group wallet platform that sits on top of the TNG eWallet ecosystem. Think of it like Splitwise, but actually connected to a real wallet where money moves.
 
@@ -41,20 +61,20 @@ The whole thing was built in about 13 hours for a hackathon — ported from a No
 
 ---
 
-## How It Works (In Plain English)
+## 🔄 How It Works (In Plain English)
 
-1. **Sign up** with your Malaysian phone number and a 6-digit PIN.
-2. **Create a pool** — pick "Trip" or "Family", name it, set a target amount, choose your voting rules (majority, unanimous, admin-only, etc.).
-3. **Invite friends** — share an invite code or scan a steganographic QR code.
-4. **Contribute** — move money from your TNG wallet into the pool. Every ringgit is tracked as a ledger entry.
-5. **Spend** — someone creates a spend request ("RM 200 for hotel deposit"). The group sees it in real-time.
-6. **Vote** — members approve or reject. The engine resolves the vote atomically based on the pool's rules.
-7. **Execute** — once approved, pool balance goes down, requester's balance goes up. Two transaction records, one database transaction. Balances never drift.
-8. **AI watches over you** — the agent tracks spending patterns, flags anomalies, warns about budget overruns, and can even detect scam messages.
+1. 📱 **Sign up** with your Malaysian phone number and a 6-digit PIN.
+2. 🏊 **Create a pool** — pick "Trip" or "Family", name it, set a target amount, choose your voting rules (majority, unanimous, admin-only, etc.).
+3. 🤝 **Invite friends** — share an invite code or scan a steganographic QR code.
+4. 💰 **Contribute** — move money from your TNG wallet into the pool. Every ringgit is tracked as a ledger entry.
+5. 🛒 **Spend** — someone creates a spend request ("RM 200 for hotel deposit"). The group sees it in real-time.
+6. 🗳️ **Vote** — members approve or reject. The engine resolves the vote atomically based on the pool's rules.
+7. ✅ **Execute** — once approved, pool balance goes down, requester's balance goes up. Two transaction records, one database transaction. Balances never drift.
+8. 🤖 **AI watches over you** — the agent tracks spending patterns, flags anomalies, warns about budget overruns, and can even detect scam messages.
 
 ---
 
-## Architecture Overview
+## 🏗️ Architecture Overview
 
 ```
 ┌──────────────────────────────── FRONTEND (React + Vite) ────────────────────────────┐
@@ -113,7 +133,7 @@ The whole thing was built in about 13 hours for a hackathon — ported from a No
 
 ---
 
-## Repository Structure
+## 📂 Repository Structure
 
 ```
 .
@@ -233,9 +253,9 @@ The whole thing was built in about 13 hours for a hackathon — ported from a No
 
 ---
 
-## Tech Stack
+## ⚙️ Tech Stack
 
-### Backend (Python)
+### 🐍 Backend (Python)
 
 | Layer | Technology | Purpose |
 |-------|-----------|---------|
@@ -251,7 +271,7 @@ The whole thing was built in about 13 hours for a hackathon — ported from a No
 | AI (Local) | **Ollama** (llama3.2 + deepseek-r1:8b) | Offline-capable LLM for agents |
 | Changepoint | **NumPy** (BOCPD) | Bayesian Online Changepoint Detection for spend patterns |
 
-### Database
+### 🗄️ Database
 
 | Component | Technology |
 |-----------|-----------|
@@ -259,7 +279,7 @@ The whole thing was built in about 13 hours for a hackathon — ported from a No
 | Hosting | **Supabase** (transaction pooler) or local Postgres |
 | Guarantees | All balance changes in a single SQLAlchemy transaction — pool/user balances never drift |
 
-### Frontend
+### ⚛️ Frontend
 
 | Layer | Technology | Purpose |
 |-------|-----------|---------|
@@ -271,7 +291,7 @@ The whole thing was built in about 13 hours for a hackathon — ported from a No
 | Styling | **Tailwind CSS 4** | Utility-first CSS |
 | QR Scanning | **jsQR** | Client-side QR decode from camera feed |
 
-### Mobile (Mock TNG App)
+### 📱 Mobile (Mock TNG App)
 
 | Layer | Technology |
 |-------|-----------|
@@ -279,7 +299,7 @@ The whole thing was built in about 13 hours for a hackathon — ported from a No
 | Platforms | Android, iOS, macOS, Linux, Windows, Web |
 | Crypto | **HMAC-SHA256** for approval signatures |
 
-### ML Training (Offline)
+### 🧠 ML Training (Offline)
 
 | Model | Architecture | Purpose |
 |-------|-------------|---------|
@@ -287,7 +307,7 @@ The whole thing was built in about 13 hours for a hackathon — ported from a No
 | anomaly_detector.onnx | **Isolation Forest** over 13 engineered features | Flag unusual spending patterns |
 | BOCPD | **Bayesian Online Changepoint Detection** (NumPy) | Detect shifts in spending behaviour |
 
-### Infrastructure
+### ☁️ Infrastructure
 
 | Service | What It Does |
 |---------|-------------|
@@ -301,9 +321,9 @@ The whole thing was built in about 13 hours for a hackathon — ported from a No
 
 ---
 
-## Backend Deep Dive
+## 🐍 Backend Deep Dive
 
-### Core Modules
+### 🧱 Core Modules
 
 The backend follows a clean layered architecture:
 
@@ -312,7 +332,7 @@ The backend follows a clean layered architecture:
 - **`schemas/`** — Pydantic v2 models that validate incoming requests. These are the equivalent of the Zod schemas from the old TypeScript backend.
 - **`models.py`** — SQLAlchemy ORM models. 11+ tables that mirror the original Prisma schema one-to-one. Includes `User`, `Pool`, `PoolMember`, `Contribution`, `SpendRequest`, `Vote`, `Transaction`, `Notification`, `Invite`, `DeviceBindChallenge`, `PaymentApprovalChallenge`, `AgentConversation`, `PoolAgentMemory`, `UserAgentMemory`, `AgentMessage`.
 
-### How Money Moves
+### 💸 How Money Moves
 
 Every financial operation happens inside a single database transaction. When someone contributes RM 50 to a pool:
 
@@ -323,23 +343,23 @@ Every financial operation happens inside a single database transaction. When som
 
 All four writes happen atomically. If any one fails, they all roll back. This is the same pattern for spend execution, payment approval consumption, and every other flow where money changes hands.
 
-### Serialization
+### 🔄 Serialization
 
 The serializer (`serialize.py`) converts Python objects to a JSON shape that matches what Prisma used to emit — `Decimal` becomes a 2-decimal-place string (`"1234.50"`), `DateTime` becomes ISO-8601 with `Z` suffix and millisecond precision. This means the frontend doesn't need to know the backend was rewritten.
 
-### Rate Limiting
+### 🛡️ Rate Limiting
 
 Auth endpoints (`/login`, `/register`) have an in-memory sliding-window rate limiter. Nothing fancy, but enough to slow down brute-force PIN attempts during a demo.
 
-### Background Tasks
+### ⏱️ Background Tasks
 
 A 60-second loop (`expire_stale_requests`) sweeps pending spend requests that have exceeded their voting window and marks them as `EXPIRED`.
 
 ---
 
-## Frontend Deep Dive
+## ⚛️ Frontend Deep Dive
 
-### Page Structure
+### 🗺️ Page Structure
 
 | Page | Route | What It Does |
 |------|-------|-------------|
@@ -350,7 +370,7 @@ A 60-second loop (`expire_stale_requests`) sweeps pending spend requests that ha
 | **ScamCheckPage** | `/scam-check` | Paste suspicious text → AI analysis for fraud signals |
 | **ProfilePage** | `/profile` | User settings and profile management |
 
-### Key Components
+### 🧩 Key Components
 
 - **`MainAgentChat`** — Full-screen conversational AI. Users type natural language ("contribute RM 50 to my trip pool"), the agent figures out which tool to call, confirms via widgets (pool selector, PIN entry, confirmation card), then executes. 27 tools wired.
 - **`AiAdvisorDialog`** — Floating AI character on each pool page. Auto-fires a daily brief, answers pool-specific questions, includes ML-powered spending insights.
@@ -359,7 +379,7 @@ A 60-second loop (`expire_stale_requests`) sweeps pending spend requests that ha
 - **`SplitCalculator`** — Fair expense splitting, powered by the AI's DeepSeek reasoning tier.
 - **`AnalyticsDashboard`** — Charts, transaction breakdowns, budget tracking.
 
-### Data Layer
+### 📊 Data Layer
 
 The frontend uses **TanStack Query** exclusively for server state. All API calls go through `hooks.ts` which wraps every endpoint in a typed hook. WebSocket events (`useRealtimeSync.ts`) automatically invalidate relevant queries so the UI stays current without manual refetching.
 
@@ -367,11 +387,11 @@ The Vite dev server proxies `/api` and `/ws` to `localhost:4000`, so the fronten
 
 ---
 
-## AI Agent System
+## 🤖 AI Agent System
 
 There are two agents running in this app, and they're completely different beasts.
 
-### Pool Agent (one per pool)
+### 🧠 Pool Agent (one per pool)
 
 Lives at `/api/v1/pools/{id}/agent/*`. This is the financial brain for each pool.
 
@@ -397,7 +417,7 @@ The LLM then uses these signals to give grounded, data-backed advice — not jus
 
 **Personality:** Two personas — *Trip Agent* (TRIP pools) and *Home Agent* (FAMILY pools). Both follow a strict "stay silent unless it matters" rule. No chatty filler.
 
-### Main Agent (one per user)
+### 💬 Main Agent (one per user)
 
 Lives at `/api/v1/agent/*`. This is the user's personal assistant for the entire app.
 
@@ -424,7 +444,7 @@ PIN-gated tools (`contribute`, `archive_pool`) don't execute immediately — the
 - `pool_selector` — Tap to pick a pool
 - `vote` — Inline Approve/Reject buttons
 
-### 3-Tier LLM Router
+### 🔀 3-Tier LLM Router
 
 Both agents share the same routing logic:
 
@@ -438,7 +458,7 @@ For Ollama, there are two model tiers:
 - **`llama3.2`** — General chat, briefs, Q&A, spend evaluation
 - **`deepseek-r1:8b`** — Structured extraction, splits, forecasts (chain-of-thought is stripped before the user sees it)
 
-### Memory (Persistent, Postgres-Backed)
+### 🧠 Memory (Persistent, Postgres-Backed)
 
 | Table | Scope | What It Stores |
 |-------|-------|---------------|
@@ -449,32 +469,32 @@ For Ollama, there are two model tiers:
 
 ---
 
-## Machine Learning Pipeline
+## 🧠 Machine Learning Pipeline
 
 The ML pipeline trains two models offline in Python and exports them to ONNX, so the production backend runs inference with `onnxruntime` — zero Python ML frameworks at runtime.
 
-### Transaction Classifier (DistilBERT)
+### 🏷️ Transaction Classifier (DistilBERT)
 
 - Fine-tuned on ~130 Malaysian transaction descriptions
 - Classifies into 24 categories: `food_dining`, `transport_petrol`, `shopping_personal`, `medical`, `entertainment`, etc.
 - Inference: <10ms per transaction on CPU
 - Training data in `ml/transaction_classifier/data/transactions.csv`
 
-### Anomaly Detector (Isolation Forest)
+### 🚨 Anomaly Detector (Isolation Forest)
 
 - Trained on ~1,250 synthetic transactions (8% labelled anomalous)
 - Scores each transaction on a 13-feature vector
 - Inference: <5ms per transaction on CPU
 - Features include amount, time-of-day, category entropy, rolling averages
 
-### BOCPD (Bayesian Online Changepoint Detection)
+### 📈 BOCPD (Bayesian Online Changepoint Detection)
 
 - Pure NumPy implementation of Adams & MacKay 2007
 - Normal-inverse-gamma prior, constant hazard rate (30)
 - Per-pool detector cache — only replays transactions newer than the last seen
 - Alert threshold: 0.5 on `log1p(amount)` transformed series
 
-### Training
+### 🏋️ Training
 
 ```bash
 cd ml
@@ -486,11 +506,11 @@ CPU: ~30-60 min. GPU (CUDA 12.1): ~5-10 min.
 
 ---
 
-## Device-Bind Passwordless Login
+## 🔐 Device-Bind Passwordless Login
 
 No password. No OTP. No PIN. Just your phone.
 
-### The Flow
+### 🔄 The Flow
 
 1. **Web app** — User selects phone number, taps "Sign in with TNG"
 2. **Backend** — Creates a `DeviceBindChallenge` with a cryptographic nonce, HMAC-seals the binding tuple, sets 120-second TTL
@@ -500,7 +520,7 @@ No password. No OTP. No PIN. Just your phone.
 6. **Lambda forwards to backend** — challenge flips to APPROVED
 7. **Web app detects approval** (polling) — calls consume, which re-verifies the HMAC, atomically marks `consumedAt`, and issues JWT tokens
 
-### Security Properties
+### 🛡️ Security Properties
 
 | Attack | Mitigation |
 |--------|-----------|
@@ -512,7 +532,7 @@ No password. No OTP. No PIN. Just your phone.
 | Expired challenge | 120s TTL enforced at both Lambda AND backend independently |
 | Wrong device | deviceId is part of the signed canonical, checked at Lambda + backend |
 
-### Canonical Binding Format
+### 🔑 Canonical Binding Format
 
 ```
 v1|{requestId}|{phone}|{deviceId}|{appId}|{nonce}|{expiresAt ISO}
@@ -524,11 +544,11 @@ Two independent HMAC keys protect different trust boundaries:
 
 ---
 
-## Secure Payment Approval
+## 💳 Secure Payment Approval
 
 Pool payments follow the same TNG-approval pattern but with an extra financial dimension.
 
-### The Flow
+### 🔄 The Flow
 
 1. User scans a merchant QR code on the web app
 2. Backend creates a `PaymentApprovalChallenge` — bound to pool, amount, merchant, device, and phone
@@ -541,7 +561,7 @@ Pool payments follow the same TNG-approval pattern but with an extra financial d
    - Debits pool, credits user
    - Creates dual Transaction records (pool outflow + user inflow)
 
-### Frontend Payment States
+### 🖥️ Frontend Payment States
 
 | State | UI | Transition |
 |-------|-----|-----------|
@@ -551,7 +571,7 @@ Pool payments follow the same TNG-approval pattern but with an extra financial d
 | `success` | ✅ "Verified by TNG + AWS Lambda" | 2.5s auto-close |
 | `failed` | ❌ Error + "Try Again" | User action |
 
-### CloudWatch Alarms
+### 🚨 CloudWatch Alarms
 
 | Alarm | Metric | Threshold |
 |-------|--------|-----------|
@@ -562,13 +582,13 @@ Alerts go to SNS → email.
 
 ---
 
-## Voting Engine
+## 🗳️ Voting Engine
 
 The voting engine is the heart of the spend approval flow. `resolve_voting_status` in `backend/app/services/spend_service.py` is a pure function — given the pool config, eligible member count, and current votes, it returns `APPROVED`, `REJECTED`, or `PENDING`.
 
 It runs inside the same DB transaction as the vote insert, so vote casting and resolution are atomic.
 
-### Resolution Rules
+### 📋 Resolution Rules
 
 | Strategy | Rule |
 |----------|------|
@@ -577,7 +597,7 @@ It runs inside the same DB transaction as the vote insert, so vote casting and r
 | **THRESHOLD** | ≥ `approvalThreshold` approved |
 | **ADMIN_ONLY** | Owner's vote decides |
 
-### Edge Cases
+### ⚠️ Edge Cases
 
 - **Early rejection** — If remaining unvoted members can no longer reach the threshold, the request is rejected immediately. No point waiting.
 - **Emergency override** — FAMILY pools with `emergencyOverride=true` create spend requests as `APPROVED` immediately, skipping the vote entirely.
@@ -585,7 +605,7 @@ It runs inside the same DB transaction as the vote insert, so vote casting and r
 
 ---
 
-## Real-Time Events (WebSocket)
+## ⚡ Real-Time Events (WebSocket)
 
 Connect to `ws://host/ws?token=<accessToken>`. The server auto-subscribes you to your user channel. To get pool events:
 
@@ -593,7 +613,7 @@ Connect to `ws://host/ws?token=<accessToken>`. The server auto-subscribes you to
 { "action": "subscribe", "poolId": "clx..." }
 ```
 
-### Event Types
+### 📨 Event Types
 
 | Event | Channel | When |
 |-------|---------|------|
@@ -610,7 +630,7 @@ Fan-out is in-process by default. Set `REDIS_URL` to switch to Redis pub/sub for
 
 ---
 
-## Full API Surface
+## 📡 Full API Surface
 
 ```
 POST   /api/v1/auth/register
@@ -694,7 +714,7 @@ GET    /api/v1/health
 
 ---
 
-## Database Schema
+## 🗄️ Database Schema
 
 11+ SQLAlchemy models mirroring the original Prisma schema:
 
@@ -718,7 +738,7 @@ GET    /api/v1/health
 
 ---
 
-## AWS Infrastructure
+## ☁️ AWS Infrastructure
 
 | Service | Resource | Purpose |
 |---------|----------|---------|
@@ -734,9 +754,9 @@ GET    /api/v1/health
 
 ---
 
-## Getting Started
+## 🚀 Getting Started
 
-### 1. Configure Environment
+### 1️⃣ Configure Environment
 
 ```bash
 cp .env.example .env
@@ -753,21 +773,21 @@ DATABASE_URL=postgresql://postgres.<project-ref>:<URL-encoded-password>@aws-1-<r
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/tng_pool
 ```
 
-### 2. Install Python Dependencies
+### 2️⃣ Install Python Dependencies
 
 ```bash
 cd backend
 python -m pip install -r requirements.txt
 ```
 
-### 3. Create Schema + Seed Demo Data
+### 3️⃣ Create Schema + Seed Demo Data
 
 ```bash
 python -m app.bootstrap     # DROP+CREATE schema public, then create_all()
 python -m app.seed           # 4 users, 2 pools, contributions, votes
 ```
 
-### 4. Run the API
+### 4️⃣ Run the API
 
 ```bash
 cd backend
@@ -778,7 +798,7 @@ python -m uvicorn app.main:app --host 0.0.0.0 --port 4000 --reload
 - WebSocket: `ws://localhost:4000/ws?token=<accessToken>`
 - OpenAPI docs: `http://localhost:4000/docs`
 
-### 5. Run the Frontend
+### 5️⃣ Run the Frontend
 
 ```bash
 cd web
@@ -788,7 +808,7 @@ npm run dev
 
 Visit `http://localhost:5173`. Vite proxies `/api` and `/ws` to the FastAPI backend on `:4000`.
 
-### 6. Smoke Test
+### 6️⃣ Smoke Test
 
 ```bash
 # Login as Ahmad
@@ -803,7 +823,7 @@ curl -s http://localhost:4000/api/v1/pools \
 
 ---
 
-## Demo Accounts
+## 👤 Demo Accounts
 
 All accounts use PIN `123456`:
 
@@ -816,11 +836,11 @@ All accounts use PIN `123456`:
 
 ---
 
-## Deployment
+## 📦 Deployment
 
 The backend is a stock FastAPI + Uvicorn app. It deploys identically to Render, Fly.io, Railway, or AWS App Runner / ECS Fargate.
 
-### Environment Variables
+### 🔧 Environment Variables
 
 | Variable | Required | Notes |
 |----------|----------|-------|
@@ -835,13 +855,13 @@ The backend is a stock FastAPI + Uvicorn app. It deploys identically to Render, 
 | `DEVICE_BIND_SECRET` | For device-bind | HMAC key for challenge sealing |
 | `TNG_APPROVER_KEY` | For device-bind | HMAC key for approval verification |
 
-### Start Command
+### ▶️ Start Command
 
 ```bash
 uvicorn app.main:app --host 0.0.0.0 --port $PORT
 ```
 
-### Health Check
+### 🩺 Health Check
 
 ```
 GET /api/v1/health → {"status":"ok",...}
@@ -851,7 +871,7 @@ The Supabase pooler runs PgBouncer in transaction mode; `backend/app/db.py` auto
 
 ---
 
-## What's Not In This Slice
+## 🚧 What's Not In This Slice
 
 These features are spec'd but not implemented in this hackathon cut:
 
@@ -867,7 +887,7 @@ All of these can be layered on top without touching the core engine.
 
 ---
 
-## Notes for Contributors
+## 📝 Notes for Contributors
 
 1. **Money is `Decimal`, never float.** The serializer always emits 2-dp strings (`"1234.50"`) so the frontend doesn't deal with rounding.
 
@@ -885,6 +905,7 @@ All of these can be layered on top without touching the core engine.
 
 8. **BOCPD detector cache is in-process only** — it reconverges in ~10 observations after a restart. Memory tables (Postgres) survive restarts.
 
+
 ---
 
-*Built in ~13 hours for the TNG eWallet hackathon. Coffee was consumed. Sleep was not.*
+*Built in ~13 hours for the TNG eWallet hackathon. ☕ Coffee was consumed. 😴 Sleep was not.*

@@ -21,7 +21,7 @@ from .serialize import jsonable as _jsonable
 from .config import cors_origin_allowed, env
 from .db import SessionLocal, engine
 from .errors import AppError
-from .models import AgentConversation, Base, DeviceBindChallenge
+from .models import AgentConversation, Base, DeviceBindChallenge, PaymentApprovalChallenge
 from .pubsub import pubsub
 from .routes import agent as agent_routes
 from .routes import auth as auth_routes
@@ -33,6 +33,7 @@ from .routes import pools as pool_routes
 from .routes import spend as spend_routes
 from .routes import transactions as tx_routes
 from .routes import users as user_routes
+from .routes import payment_approval as payment_approval_routes
 from .routes import zk as zk_routes
 from .services.spend_service import expire_stale_requests
 from .ws import setup_pubsub_dispatcher, websocket_endpoint
@@ -85,6 +86,7 @@ async def _ensure_runtime_tables() -> None:
             tables=[
                 DeviceBindChallenge.__table__,
                 AgentConversation.__table__,
+                PaymentApprovalChallenge.__table__,
             ],
             checkfirst=True,
         )
@@ -237,6 +239,7 @@ def create_app() -> FastAPI:
     app.include_router(agent_routes.pool_router, prefix="/api/v1/pools/{pool_id}/agent")
     app.include_router(agent_routes.util_router, prefix="/api/v1/agent")
     app.include_router(main_agent_routes.router, prefix="/api/v1/agent")
+    app.include_router(payment_approval_routes.router, prefix="/api/v1/payment-approval")
     app.include_router(tx_routes.router, prefix="/api/v1/pools/{pool_id}")
 
     # --- WebSocket ---

@@ -133,13 +133,24 @@ def _emit(metric: str, count: int = 1, ip: str = "") -> None:
         log.exception("metric emit failed")
 
 
-def _canonical(req_id, phone, device_id, app_id, nonce, expires_at_iso):
+def _canonical_device_bind(req_id, phone, device_id, app_id, nonce, expires_at_iso):
     # Must match backend `device_bind_service._canonical()` byte-for-byte.
     return "|".join(["v1", req_id, phone, device_id, app_id, nonce, expires_at_iso])
 
 
-def _expected_sig(req_id, phone, device_id, app_id, nonce, expires_at_iso):
-    msg = _canonical(req_id, phone, device_id, app_id, nonce, expires_at_iso) + "|approved"
+def _canonical_payment(req_id, phone, device_id, pool_id, amount, merchant_name, nonce, expires_at_iso):
+    # Must match backend `payment_approval_service._canonical()` byte-for-byte.
+    amt = "{:.2f}".format(float(amount))
+    return "|".join(["v1", req_id, phone, device_id, pool_id, amt, merchant_name, nonce, expires_at_iso])
+
+
+def _expected_sig_device_bind(req_id, phone, device_id, app_id, nonce, expires_at_iso):
+    msg = _canonical_device_bind(req_id, phone, device_id, app_id, nonce, expires_at_iso) + "|approved"
+    return hmac.new(TNG_APPROVER_KEY.encode(), msg.encode(), hashlib.sha256).hexdigest()
+
+
+def _expected_sig_payment(req_id, phone, device_id, pool_id, amount, merchant_name, nonce, expires_at_iso):
+    msg = _canonical_payment(req_id, phone, device_id, pool_id, amount, merchant_name, nonce, expires_at_iso) + "|approved"
     return hmac.new(TNG_APPROVER_KEY.encode(), msg.encode(), hashlib.sha256).hexdigest()
 
 
@@ -168,12 +179,183 @@ def _resp(status, body):
     }
 
 
+def _handle_device_bind(req, source_ip, user_agent):
+    """Device-bind approval flow (requestId starts with 'dbc_')."""
+    req_id = req["requestId"]
+    device_id = req["deviceId"]
+    sig = req["approverSig"]
+    phone = req["phone"]
+
+    # 1. Find the pending challenge for this phone.
+    code, body = _http("GET", f"/api/v1/auth/device-bind/pending?phone={urllib.parse.quote_plus(phone)}")
+    if code != 200:
+        _emit("BackendError", ip=source_ip)
+        return _resp(502, {"error": "backend unavailable"})
+    items = body.get("items", []) if isinstance(body, dict) else []
+    challenge = next((c for c in items if c.get("requestId") == req_id), None)
+    if not challenge:
+        _emit("ChallengeNotFound", ip=source_ip)
+        return _resp(404, {"error": "challenge not pending"})
+
+    # 2. Expiry
+    exp_iso = challenge["expiresAt"]
+    exp_dt = datetime.strptime(exp_iso, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    if exp_dt <= datetime.now(timezone.utc):
+        _emit("ChallengeExpired", ip=source_ip)
+        return _resp(410, {"error": "challenge expired"})
+
+    # 3. Device binding match.
+    if challenge.get("deviceId") != device_id:
+        geo = _geolocate_ip(source_ip)
+        _emit("DeviceMismatch", ip=source_ip)
+        _log_threat("DEVICE_MISMATCH", "HIGH", source_ip, geo,
+                    flow="device-bind", requestId=req_id, phone=phone,
+                    expectedDevice=challenge.get("deviceId"),
+                    claimedDevice=device_id, userAgent=user_agent)
+        return _resp(401, {"error": "device mismatch"})
+
+    # 4. HMAC signature check (constant-time).
+    expected = _expected_sig_device_bind(
+        req_id, challenge["phone"], challenge["deviceId"],
+        challenge["appId"], challenge["nonce"], exp_iso,
+    )
+    if not hmac.compare_digest(expected, sig):
+        geo = _geolocate_ip(source_ip)
+        _emit("BadSignature", ip=source_ip)
+        _log_threat("BAD_SIGNATURE", "CRITICAL", source_ip, geo,
+                    flow="device-bind", requestId=req_id, phone=phone,
+                    deviceId=device_id, userAgent=user_agent)
+        return _resp(401, {"error": "invalid approver signature"})
+
+    # 5. Replay protection.
+    try:
+        _table.put_item(
+            Item={
+                "requestId": req_id, "nonce": challenge.get("nonce", ""),
+                "phone": phone, "deviceId": device_id,
+                "sourceIp": source_ip,
+                "ttl": int(time.time()) + 24 * 3600,
+            },
+            ConditionExpression="attribute_not_exists(requestId)",
+        )
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
+            geo = _geolocate_ip(source_ip)
+            _emit("ReplayDetected", ip=source_ip)
+            _log_threat("REPLAY_ATTACK", "CRITICAL", source_ip, geo,
+                        flow="device-bind", requestId=req_id, phone=phone,
+                        deviceId=device_id, userAgent=user_agent)
+            return _resp(409, {"error": "replay detected"})
+        raise
+
+    # 6. Forward the vetted approval to the backend.
+    code, body = _http(
+        "POST", "/api/v1/auth/device-bind/approve",
+        {"requestId": req_id, "deviceId": device_id, "approverSig": sig},
+    )
+    if code != 200:
+        _emit("BackendApproveFailed", ip=source_ip)
+        return _resp(code, body)
+
+    _emit("Approved", ip=source_ip)
+    log.info("device-bind approved requestId=%s phone=%s sourceIp=%s", req_id, phone, source_ip)
+    return _resp(200, body)
+
+
+def _handle_payment_approval(req, source_ip, user_agent):
+    """Payment approval flow (requestId starts with 'pac_')."""
+    req_id = req["requestId"]
+    device_id = req["deviceId"]
+    sig = req["approverSig"]
+    phone = req["phone"]
+
+    # 1. Find the pending payment challenge.
+    code, body = _http("GET", f"/api/v1/payment-approval/pending?phone={urllib.parse.quote_plus(phone)}")
+    if code != 200:
+        _emit("BackendError", ip=source_ip)
+        return _resp(502, {"error": "backend unavailable"})
+    items = body.get("items", []) if isinstance(body, dict) else []
+    challenge = next((c for c in items if c.get("requestId") == req_id), None)
+    if not challenge:
+        _emit("ChallengeNotFound", ip=source_ip)
+        return _resp(404, {"error": "payment challenge not pending"})
+
+    # 2. Expiry
+    exp_iso = challenge["expiresAt"]
+    exp_dt = datetime.strptime(exp_iso, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    if exp_dt <= datetime.now(timezone.utc):
+        _emit("ChallengeExpired", ip=source_ip)
+        return _resp(410, {"error": "challenge expired"})
+
+    # 3. Device binding match.
+    if challenge.get("deviceId") != device_id:
+        geo = _geolocate_ip(source_ip)
+        _emit("DeviceMismatch", ip=source_ip)
+        _log_threat("DEVICE_MISMATCH", "HIGH", source_ip, geo,
+                    flow="payment", requestId=req_id, phone=phone,
+                    amount=challenge.get("amount"), merchant=challenge.get("merchantName"),
+                    userAgent=user_agent)
+        return _resp(401, {"error": "device mismatch"})
+
+    # 4. HMAC signature check (constant-time).
+    expected = _expected_sig_payment(
+        req_id, challenge["phone"], challenge["deviceId"],
+        challenge["poolId"], challenge["amount"], challenge["merchantName"],
+        challenge["nonce"], exp_iso,
+    )
+    if not hmac.compare_digest(expected, sig):
+        geo = _geolocate_ip(source_ip)
+        _emit("BadSignature", ip=source_ip)
+        _log_threat("BAD_SIGNATURE", "CRITICAL", source_ip, geo,
+                    flow="payment", requestId=req_id, phone=phone,
+                    amount=challenge.get("amount"), merchant=challenge.get("merchantName"),
+                    deviceId=device_id, userAgent=user_agent)
+        return _resp(401, {"error": "invalid approver signature"})
+
+    # 5. Replay protection.
+    try:
+        _table.put_item(
+            Item={
+                "requestId": req_id, "nonce": challenge.get("nonce", ""),
+                "phone": phone, "deviceId": device_id,
+                "amount": challenge.get("amount", "0"),
+                "merchant": challenge.get("merchantName", ""),
+                "sourceIp": source_ip,
+                "ttl": int(time.time()) + 24 * 3600,
+            },
+            ConditionExpression="attribute_not_exists(requestId)",
+        )
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
+            geo = _geolocate_ip(source_ip)
+            _emit("ReplayDetected", ip=source_ip)
+            _log_threat("REPLAY_ATTACK", "CRITICAL", source_ip, geo,
+                        flow="payment", requestId=req_id, phone=phone,
+                        amount=challenge.get("amount"), merchant=challenge.get("merchantName"),
+                        deviceId=device_id, userAgent=user_agent)
+            return _resp(409, {"error": "replay detected"})
+        raise
+
+    # 6. Forward the vetted approval to the backend.
+    code, body = _http(
+        "POST", "/api/v1/payment-approval/approve",
+        {"requestId": req_id, "deviceId": device_id, "approverSig": sig},
+    )
+    if code != 200:
+        _emit("BackendApproveFailed", ip=source_ip)
+        return _resp(code, body)
+
+    _emit("PaymentApproved", ip=source_ip)
+    log.info("payment approved requestId=%s phone=%s amount=%s merchant=%s sourceIp=%s",
+             req_id, phone, challenge.get("amount"), challenge.get("merchantName"), source_ip)
+    return _resp(200, body)
+
+
 def lambda_handler(event, _ctx):
     raw = event.get("body") or "{}"
     if event.get("isBase64Encoded"):
         raw = base64.b64decode(raw).decode()
 
-    # ── Extract source intelligence ──
     source_ip = _extract_source_ip(event)
     user_agent = _extract_user_agent(event)
 
@@ -191,88 +373,8 @@ def lambda_handler(event, _ctx):
         _emit("BadRequest", ip=source_ip)
         return _resp(400, {"error": "missing fields (requestId, deviceId, approverSig, phone)"})
 
-    # 1. Find the pending challenge for this phone.
-    code, body = _http("GET", f"/api/v1/auth/device-bind/pending?phone={urllib.parse.quote_plus(phone)}")
-    if code != 200:
-        _emit("BackendError", ip=source_ip)
-        return _resp(502, {"error": "backend unavailable"})
-    items = body.get("items", []) if isinstance(body, dict) else []
-    challenge = next((c for c in items if c.get("requestId") == req_id), None)
-    if not challenge:
-        _emit("ChallengeNotFound", ip=source_ip)
-        return _resp(404, {"error": "challenge not pending"})
-
-    # 2. Expiry — independent of the backend's expiry, so we never forward
-    #    an approval for a row the backend would reject anyway.
-    exp_iso = challenge["expiresAt"]
-    exp_dt = datetime.strptime(exp_iso, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
-    if exp_dt <= datetime.now(timezone.utc):
-        _emit("ChallengeExpired", ip=source_ip)
-        return _resp(410, {"error": "challenge expired"})
-
-    # 3. Device binding match.
-    if challenge.get("deviceId") != device_id:
-        geo = _geolocate_ip(source_ip)
-        _emit("DeviceMismatch", ip=source_ip)
-        _log_threat("DEVICE_MISMATCH", "HIGH", source_ip, geo,
-                    requestId=req_id, phone=phone,
-                    expectedDevice=challenge.get("deviceId"),
-                    claimedDevice=device_id,
-                    userAgent=user_agent)
-        return _resp(401, {"error": "device mismatch"})
-
-    # 4. HMAC signature check (constant-time).
-    expected = _expected_sig(
-        req_id,
-        challenge["phone"],
-        challenge["deviceId"],
-        challenge["appId"],
-        challenge["nonce"],
-        exp_iso,
-    )
-    if not hmac.compare_digest(expected, sig):
-        geo = _geolocate_ip(source_ip)
-        _emit("BadSignature", ip=source_ip)
-        _log_threat("BAD_SIGNATURE", "CRITICAL", source_ip, geo,
-                    requestId=req_id, phone=phone,
-                    deviceId=device_id,
-                    userAgent=user_agent)
-        return _resp(401, {"error": "invalid approver signature"})
-
-    # 5. Replay protection. DynamoDB conditional put — first submission wins.
-    try:
-        _table.put_item(
-            Item={
-                "requestId": req_id,
-                "nonce": challenge.get("nonce", ""),
-                "phone": phone,
-                "deviceId": device_id,
-                "sourceIp": source_ip,
-                "ttl": int(time.time()) + 24 * 3600,
-            },
-            ConditionExpression="attribute_not_exists(requestId)",
-        )
-    except ClientError as e:
-        if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
-            geo = _geolocate_ip(source_ip)
-            _emit("ReplayDetected", ip=source_ip)
-            _log_threat("REPLAY_ATTACK", "CRITICAL", source_ip, geo,
-                        requestId=req_id, phone=phone,
-                        deviceId=device_id,
-                        userAgent=user_agent)
-            return _resp(409, {"error": "replay detected"})
-        raise
-
-    # 6. Forward the vetted approval to the backend.
-    code, body = _http(
-        "POST",
-        "/api/v1/auth/device-bind/approve",
-        {"requestId": req_id, "deviceId": device_id, "approverSig": sig},
-    )
-    if code != 200:
-        _emit("BackendApproveFailed", ip=source_ip)
-        return _resp(code, body)
-
-    _emit("Approved", ip=source_ip)
-    log.info("approved requestId=%s phone=%s sourceIp=%s", req_id, phone, source_ip)
-    return _resp(200, body)
+    # Route by requestId prefix: pac_ = payment, dbc_ = device-bind
+    if req_id.startswith("pac_"):
+        return _handle_payment_approval(req, source_ip, user_agent)
+    else:
+        return _handle_device_bind(req, source_ip, user_agent)

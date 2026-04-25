@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { CheckCircle2, X, QrCode, Shield, Users, Zap } from 'lucide-react';
+import { CheckCircle2, X, QrCode, Shield, Users, Zap, Loader2 } from 'lucide-react';
+import { usePaymentApproval } from '../../api/hooks';
 
 interface Pool {
   id: string;
@@ -16,26 +17,29 @@ interface PoolScanPayDialogProps {
   pool: Pool | null;
 }
 
-type ScanStep = 'scanning' | 'confirm' | 'success';
+type ScanStep = 'scanning' | 'confirm' | 'approving' | 'success' | 'failed';
 
 // Fake merchants for demo
 const FAKE_MERCHANTS = [
-  { name: 'Giant Hypermarket', amount: 47.5, category: 'Groceries' },
-  { name: '99 Speedmart', amount: 22.0, category: 'Groceries' },
-  { name: 'KFC Malaysia', amount: 35.9, category: 'Food & Drinks' },
-  { name: 'Restoran Nasi Lemak', amount: 18.0, category: 'Food & Drinks' },
-  { name: 'Petronas Station', amount: 60.0, category: 'Fuel' },
+  { name: 'Giant Hypermarket', amount: 47.5, category: 'GROCERIES' },
+  { name: '99 Speedmart', amount: 22.0, category: 'GROCERIES' },
+  { name: 'KFC Malaysia', amount: 35.9, category: 'FOOD' },
+  { name: 'Restoran Nasi Lemak', amount: 18.0, category: 'FOOD' },
+  { name: 'Petronas Station', amount: 60.0, category: 'PETROL' },
 ];
 
 export function PoolScanPayDialog({ open, onOpenChange, pool }: PoolScanPayDialogProps) {
   const [step, setStep] = useState<ScanStep>('scanning');
   const [merchant] = useState(FAKE_MERCHANTS[Math.floor(Math.random() * FAKE_MERCHANTS.length)]);
   const [scanProgress, setScanProgress] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+  const paymentApproval = usePaymentApproval();
 
   useEffect(() => {
     if (!open) {
       setStep('scanning');
       setScanProgress(0);
+      setError(null);
       return;
     }
     if (step === 'scanning') {
@@ -55,14 +59,27 @@ export function PoolScanPayDialog({ open, onOpenChange, pool }: PoolScanPayDialo
     setTimeout(() => {
       setStep('scanning');
       setScanProgress(0);
+      setError(null);
     }, 300);
   };
 
-  const handlePay = () => {
-    setStep('success');
-    setTimeout(() => {
-      handleClose();
-    }, 2200);
+  const handleSecurePay = async () => {
+    if (!pool) return;
+    setStep('approving');
+    setError(null);
+    try {
+      await paymentApproval.mutateAsync({
+        poolId: pool.id,
+        amount: merchant.amount,
+        merchantName: merchant.name,
+        category: merchant.category,
+      });
+      setStep('success');
+      setTimeout(() => handleClose(), 2500);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Payment failed');
+      setStep('failed');
+    }
   };
 
   if (!open || !pool) return null;
@@ -137,17 +154,11 @@ export function PoolScanPayDialog({ open, onOpenChange, pool }: PoolScanPayDialo
             <div style={{ margin: '0 20px 20px' }}>
               <div
                 style={{
-                  height: 220,
-                  borderRadius: 20,
-                  background: '#0A0A14',
-                  position: 'relative',
-                  overflow: 'hidden',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
+                  height: 220, borderRadius: 20, background: '#0A0A14',
+                  position: 'relative', overflow: 'hidden',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
                 }}
               >
-                {/* Corner brackets */}
                 {[{ top: 12, left: 12 }, { top: 12, right: 12 }, { bottom: 12, left: 12 }, { bottom: 12, right: 12 }].map((pos, i) => (
                   <div key={i} style={{
                     position: 'absolute', ...pos,
@@ -159,7 +170,6 @@ export function PoolScanPayDialog({ open, onOpenChange, pool }: PoolScanPayDialo
                     borderRadius: i === 0 ? '4px 0 0 0' : i === 1 ? '0 4px 0 0' : i === 2 ? '0 0 0 4px' : '0 0 4px 0',
                   }} />
                 ))}
-                {/* Scanning line */}
                 <div
                   className="scan-line"
                   style={{
@@ -169,7 +179,6 @@ export function PoolScanPayDialog({ open, onOpenChange, pool }: PoolScanPayDialo
                     borderRadius: 1,
                   }}
                 />
-                {/* QR icon in center */}
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, opacity: 0.4 }}>
                   <QrCode size={56} color="rgba(255,255,255,0.6)" />
                   <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)', margin: 0, fontFamily: 'Inter, sans-serif' }}>Point camera at QR code</p>
@@ -254,7 +263,7 @@ export function PoolScanPayDialog({ open, onOpenChange, pool }: PoolScanPayDialo
               )}
 
               {/* AI check */}
-              <div style={{ borderRadius: 14, background: '#F0FDF4', border: '1px solid #BBF7D0', padding: '12px 16px', marginBottom: 24, display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div style={{ borderRadius: 14, background: '#F0FDF4', border: '1px solid #BBF7D0', padding: '12px 16px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 10 }}>
                 <Shield size={16} color="#059669" />
                 <div>
                   <p style={{ fontSize: 12, fontWeight: 700, color: '#059669', margin: 0, fontFamily: 'Inter, sans-serif' }}>AI Scam Check Passed</p>
@@ -262,9 +271,18 @@ export function PoolScanPayDialog({ open, onOpenChange, pool }: PoolScanPayDialo
                 </div>
               </div>
 
+              {/* TNG approval notice */}
+              <div style={{ borderRadius: 14, background: '#FEF3C7', border: '1px solid #FDE68A', padding: '12px 16px', marginBottom: 24, display: 'flex', alignItems: 'center', gap: 10 }}>
+                <Shield size={16} color="#D97706" />
+                <div>
+                  <p style={{ fontSize: 12, fontWeight: 700, color: '#92400E', margin: 0, fontFamily: 'Inter, sans-serif' }}>TNG Approval Required</p>
+                  <p style={{ fontSize: 11, color: '#B45309', margin: '2px 0 0', fontFamily: 'Inter, sans-serif' }}>You'll need to approve this payment on your TNG app for security.</p>
+                </div>
+              </div>
+
               {/* Secure Pay button */}
               <button
-                onClick={handlePay}
+                onClick={handleSecurePay}
                 className="press-scale"
                 style={{
                   width: '100%', height: 54, borderRadius: 999, border: 'none',
@@ -279,6 +297,35 @@ export function PoolScanPayDialog({ open, onOpenChange, pool }: PoolScanPayDialo
                 Secure Pay · RM {merchant.amount.toFixed(2)}
               </button>
             </div>
+          </div>
+        )}
+
+        {/* ── APPROVING (waiting for TNG app) ── */}
+        {step === 'approving' && (
+          <div style={{ padding: '40px 24px 48px', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
+            <div
+              style={{
+                width: 80, height: 80, borderRadius: '50%',
+                background: 'linear-gradient(135deg, #0059BD, #005AFF)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                marginBottom: 20,
+                boxShadow: '0 8px 24px rgba(0, 90, 255, 0.35)',
+              }}
+            >
+              <Loader2 size={36} color="#fff" className="animate-spin" style={{ animation: 'spin 1s linear infinite' }} />
+            </div>
+            <p style={{ fontSize: 20, fontWeight: 700, color: '#1A1A1A', margin: '0 0 8px', fontFamily: 'Inter, sans-serif' }}>Waiting for TNG Approval</p>
+            <p style={{ fontSize: 14, color: '#6B7280', margin: '0 0 16px', fontFamily: 'Inter, sans-serif', lineHeight: '22px' }}>
+              Open your <span style={{ fontWeight: 700, color: '#005AFF' }}>TNG eWallet</span> app<br />
+              and approve the payment of<br />
+              <span style={{ fontWeight: 700, color: '#1A1A1A', fontSize: 18 }}>RM {merchant.amount.toFixed(2)}</span><br />
+              to <span style={{ fontWeight: 700 }}>{merchant.name}</span>
+            </p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#EFF6FF', borderRadius: 999, padding: '8px 20px' }}>
+              <Shield size={14} color="#005AFF" />
+              <span style={{ fontSize: 12, color: '#005AFF', fontWeight: 600, fontFamily: 'Inter, sans-serif' }}>HMAC-secured via AWS Lambda</span>
+            </div>
+            <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
           </div>
         )}
 
@@ -305,8 +352,39 @@ export function PoolScanPayDialog({ open, onOpenChange, pool }: PoolScanPayDialo
             </p>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#F0FDF4', borderRadius: 999, padding: '8px 20px' }}>
               <Shield size={14} color="#059669" />
-              <span style={{ fontSize: 12, color: '#059669', fontWeight: 600, fontFamily: 'Inter, sans-serif' }}>Protected by AI Guardian</span>
+              <span style={{ fontSize: 12, color: '#059669', fontWeight: 600, fontFamily: 'Inter, sans-serif' }}>Verified by TNG + AWS Lambda</span>
             </div>
+          </div>
+        )}
+
+        {/* ── FAILED ── */}
+        {step === 'failed' && (
+          <div style={{ padding: '40px 24px 48px', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
+            <div
+              style={{
+                width: 80, height: 80, borderRadius: '50%',
+                background: 'linear-gradient(135deg, #DC2626, #EF4444)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                marginBottom: 20,
+                boxShadow: '0 8px 24px rgba(220, 38, 38, 0.35)',
+              }}
+            >
+              <X size={40} color="#fff" />
+            </div>
+            <p style={{ fontSize: 22, fontWeight: 700, color: '#1A1A1A', margin: '0 0 8px', fontFamily: 'Inter, sans-serif' }}>Payment Failed</p>
+            <p style={{ fontSize: 14, color: '#6B7280', margin: '0 0 24px', fontFamily: 'Inter, sans-serif', lineHeight: '22px' }}>
+              {error || 'An error occurred during payment approval.'}
+            </p>
+            <button
+              onClick={() => setStep('confirm')}
+              style={{
+                padding: '12px 32px', borderRadius: 999, border: '1px solid #D1D5DB',
+                background: '#fff', color: '#374151', fontSize: 14, fontWeight: 600,
+                cursor: 'pointer', fontFamily: 'Inter, sans-serif',
+              }}
+            >
+              Try Again
+            </button>
           </div>
         )}
       </div>

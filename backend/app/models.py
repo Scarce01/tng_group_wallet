@@ -103,6 +103,33 @@ class DeviceBindChallenge(Base):
     )
 
 
+class PaymentApprovalChallenge(Base):
+    __tablename__ = "PaymentApprovalChallenge"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_id)
+    requestId: Mapped[str] = mapped_column(String, unique=True)
+    userId: Mapped[str] = mapped_column(String, ForeignKey("User.id"))
+    phone: Mapped[str] = mapped_column(String)
+    poolId: Mapped[str] = mapped_column(String, ForeignKey("Pool.id"))
+    deviceId: Mapped[str] = mapped_column(String)
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2))
+    merchantName: Mapped[str] = mapped_column(String)
+    category: Mapped[str] = mapped_column(String)
+    nonce: Mapped[str] = mapped_column(String)
+    challengeHash: Mapped[str] = mapped_column(String)
+    status: Mapped[str] = mapped_column(String, default="PENDING")
+    approverSig: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    expiresAt: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    createdAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    approvedAt: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    consumedAt: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index("PaymentApproval_phone_status_idx", "phone", "status"),
+        Index("PaymentApproval_expiresAt_idx", "expiresAt"),
+    )
+
+
 class Pool(Base):
     __tablename__ = "Pool"
 

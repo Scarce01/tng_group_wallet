@@ -164,6 +164,91 @@ export function useDeviceBindLogin() {
   });
 }
 
+// ---- Payment approval (secure pay via TNG mock app) -----------------------
+
+export interface PaymentApprovalChallenge {
+  requestId: string;
+  phone: string;
+  deviceId: string;
+  poolId: string;
+  amount: string;
+  merchantName: string;
+  category: string;
+  nonce: string;
+  status: "PENDING" | "APPROVED" | "REJECTED" | "EXPIRED" | "CONSUMED";
+  expiresAt: string;
+  createdAt: string;
+  expiresInSeconds: number;
+  transaction?: {
+    poolTxId: string;
+    userTxId: string;
+    amount: string;
+    merchantName: string;
+    category: string;
+  };
+  poolBalance?: string;
+  userBalance?: string;
+}
+
+export function usePaymentApproval() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (vars: {
+      poolId: string;
+      amount: number;
+      merchantName: string;
+      category: string;
+    }) => {
+      const deviceId = getOrCreateDeviceId();
+
+      const challenge = await api<PaymentApprovalChallenge>(
+        "/payment-approval/initiate",
+        {
+          method: "POST",
+          body: {
+            poolId: vars.poolId,
+            deviceId,
+            amount: vars.amount.toFixed(2),
+            merchantName: vars.merchantName,
+            category: vars.category,
+          },
+        },
+      );
+
+      const deadline = Date.now() + challenge.expiresInSeconds * 1000;
+      // Poll until TNG app approves/rejects
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        await new Promise((r) => setTimeout(r, 1500));
+        if (Date.now() > deadline + 2000) {
+          throw new Error("Payment approval expired. Please try again.");
+        }
+        const status = await api<PaymentApprovalChallenge>(
+          `/payment-approval/status/${challenge.requestId}`,
+          { method: "POST", body: { deviceId } },
+        );
+        if (status.status === "APPROVED" && status.transaction) {
+          return { challenge, result: status };
+        }
+        if (status.status === "REJECTED") {
+          throw new Error("Payment rejected on the TNG app.");
+        }
+        if (status.status === "EXPIRED") {
+          throw new Error("Payment approval expired. Please try again.");
+        }
+        if (status.status === "CONSUMED") {
+          throw new Error("This payment was already processed.");
+        }
+      }
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["pools"] });
+      qc.invalidateQueries({ queryKey: ["pool"] });
+      qc.invalidateQueries({ queryKey: ["me"] });
+    },
+  });
+}
+
 export function useLogout() {
   const qc = useQueryClient();
   return useMutation({

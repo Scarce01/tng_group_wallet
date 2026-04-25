@@ -27,7 +27,7 @@
 ## Table of Contents
 
 - [💡 What Is This?](#-what-is-this)
-- [🔄 How It Works (In Plain English)](#-how-it-works-in-plain-english)
+- [🔄 How It Works 
 - [🏗️ Architecture Overview](#️-architecture-overview)
 - [📂 Repository Structure](#-repository-structure)
 - [⚙️ Tech Stack](#️-tech-stack)
@@ -61,7 +61,7 @@ The whole thing was built in about 13 hours for a hackathon — ported from a No
 
 ---
 
-## 🔄 How It Works (In Plain English)
+## 🔄 How It Works 
 
 1. 📱 **Sign up** with your Malaysian phone number and a 6-digit PIN.
 2. 🏊 **Create a pool** — pick "Trip" or "Family", name it, set a target amount, choose your voting rules (majority, unanimous, admin-only, etc.).

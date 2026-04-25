@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import svgPaths from '../../imports/Profile/svg-l4tnxfp784';
 import { CreditCard, Phone, CheckCircle2, MessageCircle, Mail } from 'lucide-react';
+import { useLogout } from '../../api/hooks';
 
 // ─── Shared types ─────────────────────────────────────────────────────────────
 type Screen =
@@ -1006,6 +1007,7 @@ function SettingsItem({ icon, label, subtitle, onClick }: { icon: React.ReactNod
 export function ProfilePage() {
   const [screen, setScreen] = useState<Screen>('profile');
   const toast = useToast();
+  const logoutM = useLogout();
 
   if (screen === 'account') return <AccountSettings onBack={() => setScreen('profile')} />;
   if (screen === 'notifications') return <NotificationsScreen onBack={() => setScreen('profile')} />;
@@ -1081,20 +1083,26 @@ export function ProfilePage() {
         <SettingsItem icon={<IconAppSettings />} label="App Settings" subtitle="Preferences" onClick={() => setScreen('appsettings')} />
       </div>
 
-      {/* Log Out button */}
+      {/* Log Out button — clears tokens, then AppShell.Gate reloads to LoginPage */}
       <div style={{ padding: '24px 20px 100px' }}>
         <button
-          onClick={() => toast.show('👋 Logging out...')}
+          onClick={() => {
+            toast.show('👋 Logging out...');
+            logoutM.mutate();
+          }}
+          disabled={logoutM.isPending}
           style={{
             width: '100%', padding: 16, borderRadius: 16,
             border: '1.5px solid #FEE2E2', background: '#fff',
             fontSize: 14, fontWeight: 700, color: '#EF4444',
-            cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+            cursor: logoutM.isPending ? 'wait' : 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
             boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+            opacity: logoutM.isPending ? 0.7 : 1,
           }}
         >
           <LogoutIcon />
-          <span className="text-[#0055d6]">Log Out</span>
+          <span className="text-[#0055d6]">{logoutM.isPending ? 'Logging out…' : 'Log Out'}</span>
         </button>
       </div>
 

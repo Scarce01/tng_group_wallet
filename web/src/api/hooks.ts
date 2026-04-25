@@ -84,6 +84,12 @@ export function useLogout() {
     onSettled: () => {
       tokens.clear();
       qc.clear();
+      // AppShell.Gate reads `tokens.access` non-reactively, so we need a hard
+      // reload to bounce back to LoginPage. Also resets any in-flight queries
+      // / WebSocket connections cleanly.
+      if (typeof window !== "undefined") {
+        window.location.assign("/");
+      }
     },
   });
 }

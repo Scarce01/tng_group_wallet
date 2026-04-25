@@ -1,0 +1,32 @@
+# App Runner build manifest. Lives at the repo root.
+#
+# We use docker-based build (not the managed Python runtime) because
+# opencv-python pulls in system libs that managed runtimes don't carry.
+#
+# App Runner watches the configured branch. Every push triggers:
+#   pre-build  -> build  -> post-build  -> deploy.
+# Set Source directory = backend/ when creating the service so the
+# build context matches the Dockerfile path.
+
+version: 1.0
+runtime: docker
+build:
+  commands:
+    pre-build:
+      - echo "Building TNG Pool Engine"
+run:
+  runtime-version: latest
+  command: sh -c "uvicorn app.main:app --host 0.0.0.0 --port ${PORT}"
+  network:
+    port: 8000
+    env: PORT
+  env:
+    # NOTE: do NOT put real secrets here. Use App Runner's
+    # "Secrets and configuration" UI (Secrets Manager / SSM Parameter Store)
+    # for DATABASE_URL, JWT_*_SECRET, DEVICE_BIND_SECRET, TNG_APPROVER_KEY.
+    - name: NODE_ENV
+      value: production
+    - name: LOG_LEVEL
+      value: info
+    - name: PORT
+      value: "8000"

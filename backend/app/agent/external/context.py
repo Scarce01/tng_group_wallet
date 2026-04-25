@@ -7,6 +7,7 @@ from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..memory import get_pool_memory, upsert_pool_memory
+from . import maps as maps_adapter
 from . import weather as weather_adapter
 
 
@@ -31,20 +32,30 @@ async def refresh_context_if_needed(
         if age_h < refresh_interval_hours:
             return _read_cache(mem)
 
-    # Fetch in parallel where adapters exist
+    # Fetch in parallel where adapters exist. Both adapters fail-open:
+    # a None return just means that slot stays empty in the cache.
+    import asyncio as _asyncio
     weather = None
+    places = None
     if mem.location:
-        weather = await weather_adapter.get_forecast(
-            mem.location,
-            days=min(5, max(1, state.get("daysRemaining") or 3)),
+        days = min(5, max(1, state.get("daysRemaining") or 3))
+        weather, places = await _asyncio.gather(
+            weather_adapter.get_forecast(mem.location, days=days),
+            maps_adapter.nearby_restaurants(mem.location, limit=5),
+            return_exceptions=False,
         )
 
     await upsert_pool_memory(
         session, pool_id,
         weatherCache=weather,
+        locationTips={"restaurants": places} if places else None,
         lastContextRefresh=datetime.now(timezone.utc),
     )
-    return {"weather": weather, "fetchedAt": datetime.now(timezone.utc).isoformat()}
+    return {
+        "weather": weather,
+        "locationTips": {"restaurants": places} if places else None,
+        "fetchedAt": datetime.now(timezone.utc).isoformat(),
+    }
 
 
 def _read_cache(mem) -> dict:
@@ -73,6 +84,19 @@ def format_external_for_prompt(context: Optional[dict]) -> str:
         alerts = "; ".join(w.get("alerts", []) or [])
         chunk = head + " Forecast: " + details + (f". ⚠ {alerts}" if alerts else "")
         lines.append(chunk)
+
+    tips = context.get("locationTips") or {}
+    rests = tips.get("restaurants") or []
+    if rests:
+        rest_lines = []
+        for p in rests[:5]:
+            star = f"{p.get('rating')}★" if p.get("rating") else "no rating"
+            count = f" ({p.get('ratingCount')})" if p.get("ratingCount") else ""
+            price = f" {p['priceLabel']}" if p.get("priceLabel") else ""
+            rest_lines.append(f"- {p.get('name')}: {star}{count}{price}")
+        lines.append("NEARBY RESTAURANTS (use as alternative suggestions when relevant):\n"
+                     + "\n".join(rest_lines))
+
     if not lines:
         return ""
     return "\n\nEXTERNAL CONTEXT:\n" + "\n".join(lines)

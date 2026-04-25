@@ -20,6 +20,103 @@ A **passwordless device-bind login** where:
   verifies the cryptographic signature, blocks replay attacks, and only then
   forwards the approval to the backend.
 
+### Architecture Overview
+
+```mermaid
+graph LR
+    Web["🖥 Web App<br/>(React)"]
+    Backend["⚙️ Backend<br/>(FastAPI on EC2)"]
+    TNG["📱 TNG Mock<br/>(Flutter)"]
+    APIGW["🌐 API Gateway"]
+    Lambda["λ Lambda<br/>approve-gate"]
+    Dynamo["🗄 DynamoDB<br/>nonce table"]
+    CW["📊 CloudWatch<br/>Metrics"]
+
+    Web -- "1. POST /initiate<br/>{phone, deviceId}" --> Backend
+    Backend -- "{requestId, nonce,<br/>expiresAt}" --> Web
+    Web -. "2. Poll GET /status<br/>every 2s" .-> Backend
+    TNG -- "3. GET /pending<br/>?phone=..." --> Backend
+    Backend -- "pending challenges<br/>with full binding" --> TNG
+    TNG -- "4. POST /approve<br/>{requestId, deviceId,<br/>approverSig, phone}" --> APIGW
+    APIGW --> Lambda
+    Lambda -- "fetch challenge" --> Backend
+    Lambda -- "5. replay check<br/>(conditional put)" --> Dynamo
+    Lambda -- "6. forward vetted<br/>approval" --> Backend
+    Lambda -. "metrics" .-> CW
+    Backend -- "status → APPROVED" --> Web
+```
+
+### Sequence Diagram
+
+```mermaid
+sequenceDiagram
+    participant W as 🖥 Web App
+    participant B as ⚙️ Backend (EC2)
+    participant T as 📱 TNG Mock (Flutter)
+    participant G as 🌐 API Gateway
+    participant L as λ Lambda
+    participant D as 🗄 DynamoDB
+
+    Note over W,T: Step 1 — Initiate Challenge
+    W->>B: POST /initiate {phone, deviceId, deviceLabel}
+    B->>B: Generate nonce (16B random)<br/>Compute challengeHash = HMAC(DEVICE_BIND_SECRET, canonical)<br/>Set 120s TTL
+    B-->>W: {requestId, nonce, expiresAt, status: PENDING}
+
+    Note over W,T: Step 2 — Web App Polls for Approval
+    loop Every 2 seconds
+        W->>B: GET /status/{requestId}
+        B-->>W: {status: PENDING, expiresInSeconds: N}
+    end
+
+    Note over W,T: Step 3 — TNG App Shows Pending Challenge
+    T->>B: GET /pending?phone=+60112345001
+    B-->>T: [{requestId, phone, deviceId, appId, nonce, expiresAt}]
+    Note over T: Display binding details:<br/>Which phone, device, app,<br/>request, and countdown
+
+    Note over W,T: Step 4 — User Taps Approve
+    T->>T: Compute approverSig =<br/>HMAC-SHA256(TNG_APPROVER_KEY,<br/>"v1|reqId|phone|devId|appId|nonce|exp|approved")
+    T->>G: POST /approve {requestId, deviceId, approverSig, phone}
+    G->>L: Forward request
+
+    Note over L,D: Step 5 — Lambda 6-Point Verification
+    L->>B: GET /pending?phone=... (fetch challenge)
+    B-->>L: challenge details
+
+    rect rgb(255, 240, 240)
+        Note over L: ① Challenge exists? → 404 if not
+        Note over L: ② Expired? → 410 if yes
+        Note over L: ③ deviceId match? → 401 if mismatch
+        Note over L: ④ HMAC sig valid? (constant-time) → 401 if bad
+    end
+
+    L->>D: PutItem {requestId} <br/>ConditionExpression: attribute_not_exists(requestId)
+    D-->>L: Success (first time) or ConditionalCheckFailed (replay)
+
+    rect rgb(255, 230, 230)
+        Note over L,D: ⑤ Replay? → 409 if duplicate requestId
+    end
+
+    L->>B: POST /approve {requestId, deviceId, approverSig}
+    B->>B: Verify sig + flip status → APPROVED
+    B-->>L: {status: APPROVED}
+
+    rect rgb(230, 255, 230)
+        Note over L: ⑥ Forward success — emit "Approved" metric
+    end
+
+    L-->>G: 200 {status: APPROVED}
+    G-->>T: 200 OK
+
+    Note over W,T: Step 6 — Web App Detects Approval & Gets Token
+    W->>B: GET /status/{requestId}
+    B-->>W: {status: APPROVED}
+    W->>B: Consume → verify challengeHash, mark consumedAt
+    B-->>W: {accessToken, refreshToken, user}
+    Note over W: ✅ Logged in — no password entered
+```
+
+### ASCII Architecture (for terminals)
+
 ```
 ┌──────────┐   initiate   ┌──────────────┐  poll pending  ┌──────────────┐
 │  Web App  │────────────▶│   Backend    │◀──────────────│  TNG Mock    │

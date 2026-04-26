@@ -1526,4 +1526,3 @@ All of these can be layered on top without touching the core engine.
 
 ---
 
-*Built in ~13 hours for the TNG eWallet hackathon. ☕ Coffee was consumed. 😴 Sleep was not.*

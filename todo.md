@@ -27,8 +27,8 @@ TNG 端对 challenge 做签名或确认
 账号密码 是 
 可以用 aws cli to configure for it 
 https://d-9667a99701.awsapps.com/start/#/
-Account E-mail : talenttap+finhackuser80@tngdigital.com.my
-Password : ga!Nh8E5Ldg;AkYX$W}*
+Account E-mail : xxxxx
+Password : xxxxx
 
 Lambda 做 checking 是好的
 前提是你把它用在：
